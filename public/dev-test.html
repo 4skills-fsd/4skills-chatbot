@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4Skills widget — host page simulator</title>
+
+<!-- The real site loads these. Kept here so jQuery conflicts show up locally.
+     The page still works offline; only these two requests fail. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+<!-- The real site loads Heebo, and the widget inherits it rather than fetching
+     its own copy. Without this here, local testing silently renders a fallback
+     and the widget looks nothing like production. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&display=swap">
+
+<style>
+  /* Design tokens, as tokens.css provides them on the real site. Comment this
+     block out to check the widget's literal fallbacks (the 404.php case). */
+  :root{
+    --color-navy:#0B2545; --color-navy-800:#08192F;
+    --color-gold:#C9A227; --color-gold-ink:#6E5719;
+  }
+
+  /* ---- deliberately hostile host CSS ----
+     Nothing here should reach inside the shadow root. `[hidden]` and the
+     !important button rules are the ones that would actually break the widget
+     if isolation failed: the first would reveal the closed panel, the second
+     would repaint the FAB. */
+  *{box-sizing:content-box;}
+  body{font-family:"Comic Sans MS",cursive;line-height:3;color:#c0392b;padding:24px;}
+  div{letter-spacing:2px;}
+  button{background:hotpink!important;border-radius:0!important;text-transform:uppercase!important;
+         font-size:22px!important;border:4px dashed green!important;}
+  a{color:lime!important;text-decoration:underline wavy!important;}
+  textarea{font-size:30px!important;background:#000!important;color:#0f0!important;}
+  svg{width:100%!important;height:auto!important;}
+  [hidden]{display:block!important;}
+
+  /* probe: must stay exactly as declared if the widget leaks nothing outward */
+  #probe{font-size:16px;color:#333;background:#eee;padding:8px;line-height:1.5;}
+  #report,#teaserstate{font-family:ui-monospace,monospace;font-size:13px;line-height:1.6;
+          background:#111;color:#eee;padding:14px;border-radius:8px;white-space:pre;
+          letter-spacing:normal;}
+  .pass{color:#4ade80;} .fail{color:#f87171;}
+</style>
+</head>
+<body>
+
+<h1>Host page simulator</h1>
+<p>Bootstrap 5 + jQuery + hostile CSS, the way <code>4skills.co</code> is built.
+   The widget should be completely unaffected, and this page should be unaffected by it.</p>
+
+<div id="probe">Probe element — the widget must not change how this looks.</div>
+
+<h2>Checks</h2>
+<div id="report">running…</div>
+
+<h2>Session state <small style="font-weight:400">— live, updates twice a second</small></h2>
+<div id="teaserstate">…</div>
+<p style="line-height:1.5">
+  <button type="button" id="showteaser">Show teaser now</button>
+  <button type="button" id="resetteaser">Reset teaser only</button>
+  <span style="font-size:13px">
+    Once <code>done</code> is 1 the teaser will not show again in this tab, and
+    <code>sessionStorage</code> survives reloads — so a plain refresh will not bring it back.
+    <b>Opening the chat sets <code>done</code>.</b>
+  </span>
+</p>
+
+<h2>Mobile <small style="font-weight:400">— the keyboard cannot be simulated by resizing alone</small></h2>
+<p style="line-height:1.6;font-size:14px">
+  Narrow the window under 480px (DevTools device toolbar: 360, 390, 430). Then use this to
+  fake the on-screen keyboard — it sets <code>--fs-kb</code>, exactly what the widget's
+  visualViewport listener sets on a real device:
+</p>
+<p>
+  <button type="button" data-kb="0">keyboard off</button>
+  <button type="button" data-kb="300">300px</button>
+  <button type="button" data-kb="336">336px</button>
+  <button type="button" data-kb="346">346px</button>
+  <span id="kbstate" style="font-size:13px"></span>
+</p>
+<ol style="font-size:14px">
+  <li>With the panel OPEN under 480px, the chat FAB and the practice-tests pill are gone.
+      They come back when you close it.</li>
+  <li>"Practice tests" appears as a chip in the starter row instead, opening 4skills.app.</li>
+  <li>56px of this page stays visible above the sheet, and the sheet's top corners are rounded.</li>
+  <li>A short conversation sits just above the composer, not stranded at the top.</li>
+  <li>With the fake keyboard on, the composer stays visible and the message list shrinks.
+      It must not scroll behind the composer.</li>
+</ol>
+
+<h2>Manual checks</h2>
+<ol>
+  <li><b>Logo:</b> a 22px mark sits left of "4Skills" in the header, vertically centred.
+      While the bot is thinking, the same mark appears at 20px and 55% opacity to the left
+      of the three dots — the mark is still, only the dots pulse. It is a placeholder
+      "4S" square until the real asset lands — it now loads from
+      <a href="/logo.svg">/logo.svg</a>, falling back to an inlined copy if that 404s.</li>
+  <li><b>Scroll landing:</b> ask something with a long answer ("what courses do you offer").
+      You should land at the TOP of the reply, reading word one — not at the bottom of it.
+      A short reply should still sit fully visible at the bottom.</li>
+  <li>Chat FAB is a solid near-black circle, not hotpink with a dashed green border.</li>
+  <li>"Practice tests" pill is white with a light grey border and dark text — not lime/wavy —
+      and opens 4skills.app in a new tab. Grey fill on hover.</li>
+  <li>Assistant replies are plain dark text on white: no bubble, no avatar, no coloured rule.
+      Your own messages sit right, in a light grey rounded bubble.</li>
+  <li>Panel opens on click, closes on the × and on <kbd>Escape</kbd>, focus returns to the FAB.</li>
+  <li><kbd>Tab</kbd> cycles inside the open panel and never reaches this page behind it.</li>
+  <li>Every control shows a visible focus ring when tabbed to.</li>
+  <li>Textarea is white with normal text, not black/green at 30px.</li>
+  <li><kbd>Enter</kbd> sends, <kbd>Shift</kbd>+<kbd>Enter</kbd> makes a newline, counter appears at 400 chars.</li>
+  <li>Narrow the window under 480px: panel goes full-screen, pill collapses to the icon.</li>
+  <li>Console is clean — no errors, no jQuery conflict.</li>
+  <li><b>No tracked-out text.</b> Nothing in the widget should have wide letter spacing,
+      even though this page sets <code>div{letter-spacing:2px}</code>.</li>
+  <li><b>One border on the composer.</b> A single grey pill. Click into it: the same border
+      darkens. No second ring, no doubled outline.</li>
+  <li><b>The panel floats.</b> Rounded 20px corners visible on all four, a soft shadow,
+      and a clear 20px gap from the right edge of the window.</li>
+  <li><b>Frosted, but barely see-through.</b> At 0.94 you should sense colour and movement
+      behind the panel, softened — not read the page through it as grey. Scroll the page
+      with the panel open: the blur should shift.</li>
+  <li><b>One sheet, no seams.</b> Header, messages and composer must share the same frosted
+      surface with no dividing line and no patch of different opacity anywhere.</li>
+  <li><b>Motion:</b> panel scales up from the FAB corner on open and drops away faster on
+      close. New messages rise 8px as they land. Restoring a saved thread must
+      <em>not</em> animate. Chips lift on hover, send button dips on press, FAB grows
+      slightly on hover.</li>
+  <li><b>Reduced motion:</b> turn it on in the OS. Everything above should still work,
+      instantly, with no movement at all — including the panel closing.</li>
+  <li><b>Call back is a chip in the thread</b>, appearing after the assistant's first reply
+      and styled like the starter chips. There is no bar above the composer.</li>
+  <li><b>Wide and calm.</b> 440 × 520, landscape. Header, messages and composer all start
+      on the same left rail. Header under 48px tall, title only, no subtitle.</li>
+  <li><b>Heebo is really rendering</b> — check the automated line above, and compare the
+      panel text to this page's Comic Sans. They must look like different fonts.</li>
+  <li>Structured replies: open <a href="/dev-test.html?rich">?rich</a>. Expect bold fees, a
+      real bullet list, two working links, and two URLs shown as
+      <em>plain text</em> (<code>/pricing</code> and the <code>.evil.com</code> lookalike).
+      If either of those two is clickable, the allowlist is broken.</li>
+  <li><b>Persistence:</b> send a message, then <a href="/dev-test.html">reload this page</a> and
+      reopen the chat. The thread should still be there, the greeting should appear once, and
+      the starter chips should <em>not</em> come back.</li>
+  <li><b>Error state:</b> stop the dev server, send a message. Expect
+      "Can't reach the assistant right now" with a working WhatsApp link — not a spinner
+      that never ends.</li>
+  <li><b>Rate limit:</b> send 21 messages. The 21st should return the server's friendly
+      notice, and that notice should vanish on reload (it is not conversation).</li>
+</ol>
+
+<h2>Teaser (phase 5)</h2>
+<p>Open <a href="/dev-test.html?fast">?fast</a> — delay 2s, interval 4s instead of 8s/45s.</p>
+<ol>
+  <li>Bubble appears after ~2s, above the pill, never covering the FAB. Solid white,
+      1px border, tail pointing down-right.</li>
+  <li>Three messages rotate <em>in order</em>: IELTS/PTE fees → IELTS vs PTE → batch timings.
+      After the third it stops permanently.</li>
+  <li>Each appearance auto-hides after 7s if ignored.</li>
+  <li>Dismiss with × → never returns. Reload the page → still gone
+      (<code>fourskills.teaser.done</code> survives navigation).</li>
+  <li>Open the chat instead of dismissing → also never returns.</li>
+  <li>Click the bubble text → opens the chat.</li>
+  <li>Reload mid-rotation → the count carries over, you do not get three fresh bubbles
+      on every page.</li>
+  <li>Turn on OS "reduce motion" → bubble appears with no scale/fade, same timings.</li>
+</ol>
+
+<p>Open <a href="/dev-test.html?resume">?resume</a> — seeds a stored conversation.</p>
+<ol>
+  <li>Gold unread dot on the FAB immediately, panel still closed.</li>
+  <li>One bubble reading "Continue your chat". No rotation, no repeats.</li>
+  <li>Opening the chat clears both, and the stored thread is there with the greeting
+      shown once and no starter chips.</li>
+</ol>
+
+<h2>Lead form (phase 6)</h2>
+<p>Click <b>Request a call back</b> in the panel footer, or let the bot offer it.</p>
+<ol>
+  <li><b>Never blocks the chat:</b> with the form open, the composer below is still live.
+      Type and send a message — it should work, and the form should stay put.</li>
+  <li>Course dropdown is pre-selected from what you asked about earlier in the thread.</li>
+  <li>Bad phone (<code>0412345</code>) → inline error under the field, red border, nothing sent.</li>
+  <li>Valid: <code>0332 241 0155</code>, <code>+92 332 241 0155</code>, <code>00923322410155</code>.</li>
+  <li>Submit → confirmation in the thread and a green "Continue on WhatsApp" button whose
+      link is prefilled with the name and course.</li>
+  <li><b>Decline:</b> dismiss with ×, then keep chatting. The bot must never re-offer the
+      form for the rest of the session, however interested you sound. The footer
+      "Request a call back" link comes back, because that is the visitor's choice, not ours.</li>
+  <li>After a successful submit the footer link disappears and stays gone across reloads.</li>
+</ol>
+<p>To test the sheet write, run <code>npm run mock-webhook</code> and start the dev server with
+   <code>LEAD_WEBHOOK_URL=http://localhost:4020/exec</code>. To test the sheet being broken,
+   point it at a dead port — the lead must still succeed with a WhatsApp link.</p>
+
+<p>
+  <button type="button" onclick="sessionStorage.clear();location.href='/dev-test.html';">
+  Clear everything and reload</button>
+  <button type="button" onclick="var f=JSON.parse(sessionStorage.getItem('fourskills.session')||'{}');alert('leadAsked='+!!f.leadAsked+'\nleadDeclined='+!!f.leadDeclined+'\nleadCaptured='+!!f.leadCaptured);">
+  Show lead flags</button>
+</p>
+
+<script>
+// The widget tag is injected rather than hard-coded so the teaser can be tested
+// in seconds instead of two and a half minutes. Modes:
+//   ?fast    delay 2s, interval 4s — watch all three messages rotate
+//   ?resume  seeds a stored conversation — unread dot + "Continue your chat"
+//   ?clear   wipes sessionStorage first
+(function () {
+  var q = new URLSearchParams(location.search);
+
+  if (q.has('clear') || q.has('fast')) {
+    // A finished teaser from an earlier run would suppress the whole test.
+    sessionStorage.removeItem('fourskills.teaser.done');
+    sessionStorage.removeItem('fourskills.teaser.n');
+  }
+  if (q.has('clear')) sessionStorage.clear();
+
+  if (q.has('resume')) {
+    sessionStorage.setItem('fourskills.chat', JSON.stringify([
+      { role: 'user', content: 'pte fees' },
+      { role: 'assistant', content: 'PTE Academic is Rs 28,000 for the full 8-week course.' }
+    ]));
+  }
+
+  // ?rich — seeds a stored reply exercising every feature of the renderer, so
+  // the widget's OWN render path draws it on open. Deliberately not built by
+  // hand from outside the shadow root: that would prove the demo works, not the
+  // widget. Includes two URLs that must NOT become links.
+  if (q.has('rich')) {
+    sessionStorage.setItem('fourskills.chat', JSON.stringify([
+      { role: 'user', content: 'what are the fees and where can I practise?' },
+      {
+        role: 'assistant',
+        content:
+          'Here are the confirmed course fees, all for the full 8-week course:\n' +
+          '- **IELTS Academic** — **Rs 35,000**\n' +
+          '- **IELTS General Training** — **Rs 35,000**\n' +
+          '- **PTE Academic** — **Rs 28,000**\n' +
+          '- **Spoken English** — **Rs 26,000**\n' +
+          'You can practise with mock tests at https://4skills.app and see past ' +
+          'results at https://4skills.co/success-stories-ielts.\n' +
+          'These two must render as PLAIN TEXT, not links: https://4skills.co/pricing ' +
+          'and https://4skills.app.evil.com — if either is clickable, the allowlist is broken.'
+      }
+    ]));
+  }
+
+  var fast = q.has('fast');
+  var s = document.createElement('script');
+  s.src = '/widget.js';
+  s.setAttribute('data-api', '');
+  s.setAttribute('data-teaser-delay', fast ? '2000' : '8000');
+  s.setAttribute('data-teaser-interval', fast ? '4000' : '45000');
+  s.setAttribute('data-teaser-max', '3');
+  document.head.appendChild(s);
+})();
+</script>
+
+<script>
+window.addEventListener('load', function () {
+  var out = [];
+  function line(ok, label, detail) {
+    out.push('<span class="' + (ok ? 'pass' : 'fail') + '">' +
+             (ok ? 'PASS' : 'FAIL') + '</span>  ' + label + (detail ? '   ' + detail : ''));
+  }
+
+  var host = document.getElementById('fourskills-widget');
+  line(!!host, 'widget host element mounted');
+  if (!host) { document.getElementById('report').innerHTML = out.join('\n'); return; }
+
+  var sr = host.shadowRoot;
+  line(!!sr, 'shadow root attached (open mode)');
+
+  // Host CSS must not reach in.
+  var fab = sr.querySelector('.fs-fab');
+  var fabBg = getComputedStyle(fab).backgroundColor;
+  line(fabBg !== 'rgb(255, 105, 180)', 'FAB ignores host !important button rule', fabBg);
+  line(getComputedStyle(fab).borderTopWidth === '0px', 'FAB ignores host dashed border');
+
+  // The nastiest one: host [hidden]{display:block!important} must not reveal the panel.
+  var panel = sr.querySelector('.fs-panel');
+  line(getComputedStyle(panel).display === 'none', 'closed panel stays hidden under host [hidden] override');
+
+  // Inherited properties must be cut off by all:initial on :host.
+  var rootEl = sr.querySelector('.fs-root');
+  var ff = getComputedStyle(rootEl).fontFamily;
+  line(ff.indexOf('Comic') === -1, 'host font-family does not inherit in', ff);
+  line(getComputedStyle(rootEl).lineHeight !== 'normal' &&
+       parseFloat(getComputedStyle(rootEl).lineHeight) < 30, 'host line-height:3 does not inherit in');
+
+  // BUG 1. The host element is a <div> in the OUTER document, so the page's
+  // `div{letter-spacing:2px}` matches it — and outer rules beat :host rules
+  // regardless of specificity, so `all:initial` does not save us. The fix is
+  // redeclaring the property on .fs-root, inside the shadow root.
+  var ls = getComputedStyle(rootEl).letterSpacing;
+  line(ls === 'normal' || parseFloat(ls) === 0,
+       'host letter-spacing:2px does not inherit in', ls);
+  var msgLs = getComputedStyle(sr.querySelector('.fs-log')).letterSpacing;
+  line(msgLs === 'normal' || parseFloat(msgLs) === 0,
+       'message list text is not tracked out', msgLs);
+
+  // Heebo must actually be rendering, not silently falling back.
+  line(ff.indexOf('Heebo') === 0, 'Heebo is first in the widget font stack', ff);
+  if (document.fonts && document.fonts.check) {
+    line(document.fonts.check('15px Heebo'), 'Heebo is loaded and available to render');
+  }
+
+  // BUG 2. One border around the composer, not three.
+  var row = sr.querySelector('.fs-inputrow');
+  var ta = sr.querySelector('.fs-input');
+  line(!!row, 'composer pill exists');
+  if (row && ta) {
+    var taCs = getComputedStyle(ta);
+    line(parseFloat(taCs.borderTopWidth) === 0, 'textarea has no border of its own', taCs.borderTopWidth);
+    line(taCs.outlineStyle === 'none' || parseFloat(taCs.outlineWidth) === 0,
+         'textarea has no outline at rest', taCs.outlineStyle);
+    var rowCs = getComputedStyle(row);
+    line(parseFloat(rowCs.borderTopWidth) === 1, 'pill draws the only border', rowCs.borderTopWidth);
+    line(parseFloat(rowCs.borderRadius) >= 100, 'composer is fully rounded', rowCs.borderRadius);
+  }
+
+  // BUG 3. The panel must visibly float: radius, shadow, and clearance.
+  var panelCs = getComputedStyle(panel);
+  line(Math.round(parseFloat(panelCs.borderRadius)) === 20, 'panel radius is 20px', panelCs.borderRadius);
+  line(panelCs.boxShadow !== 'none' && panelCs.boxShadow !== '', 'panel has a shadow', panelCs.boxShadow);
+  line(/inset/.test(panelCs.boxShadow), 'panel has the inset top highlight');
+
+  // Geometry: wider than tall, 20px rails on all three regions.
+  line(panelCs.width === '440px', 'panel is 440px wide', panelCs.width);
+  line(panelCs.height === '520px', 'panel is 520px tall', panelCs.height);
+  line(parseFloat(panelCs.width) > parseFloat(panelCs.height), 'panel is landscape, not portrait');
+  var rails = ['.fs-head', '.fs-log', '.fs-composer'].map(function (s) {
+    return getComputedStyle(sr.querySelector(s)).paddingLeft;
+  });
+  line(rails.every(function (v) { return v === '20px'; }),
+       'header, message list and composer share a 20px rail', rails.join(' / '));
+
+  // Glass is on the PANEL ONLY, and at high opacity. Everything inside it is
+  // transparent so the whole thing reads as one sheet.
+  var bf = panelCs.backdropFilter || panelCs.webkitBackdropFilter || 'none';
+  var hasBlur = bf.indexOf('blur') !== -1;
+  line(hasBlur ? /rgba\(255,\s*255,\s*255,\s*0\.94\)/.test(panelCs.backgroundColor)
+               : panelCs.backgroundColor === 'rgb(255, 255, 255)',
+       hasBlur ? 'panel is 0.94 white with backdrop blur'
+               : 'no backdrop-filter support — solid white fallback',
+       panelCs.backgroundColor + '  bf=' + bf);
+  line(/inset/.test(panelCs.boxShadow), 'panel has the inset top highlight');
+
+  var innerBlur = ['.fs-head', '.fs-composer', '.fs-log', '.fs-inputrow', '.fs-chip']
+    .filter(function (sel) {
+      var el = sr.querySelector(sel);
+      if (!el) return false;
+      var cs = getComputedStyle(el);
+      var b = cs.backdropFilter || cs.webkitBackdropFilter || 'none';
+      return b !== 'none' && b !== '';
+    });
+  line(innerBlur.length === 0, 'nothing inside the panel has its own blur', innerBlur.join(' '));
+
+  var opaqueInner = ['.fs-head', '.fs-composer'].filter(function (sel) {
+    var bg = getComputedStyle(sr.querySelector(sel)).backgroundColor;
+    return bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent';
+  });
+  line(opaqueInner.length === 0, 'header and composer have no layer of their own',
+       opaqueInner.join(' '));
+
+  // Header: no layer of its own, no rule under it, compact.
+  var headCs = getComputedStyle(sr.querySelector('.fs-head'));
+  line(headCs.position === 'static', 'header is in flow, not an overlay', headCs.position);
+  line(parseFloat(headCs.borderBottomWidth) === 0, 'header has no border-bottom');
+  line(headCs.backgroundColor === 'rgba(0, 0, 0, 0)' || headCs.backgroundColor === 'transparent',
+       'header has no background layer', headCs.backgroundColor);
+  line(headCs.paddingTop === '14px' && headCs.paddingLeft === '20px',
+       'header padding is 14px 20px', headCs.paddingTop + ' ' + headCs.paddingLeft);
+  line(sr.querySelector('.fs-status') === null, 'subtitle removed');
+
+  // Logo mark: header only, and the header must still clear 44px with it in.
+  var mark = sr.querySelector('.fs-mark');
+  line(!!mark, 'logo mark present in header');
+  if (mark) {
+    var markCs = getComputedStyle(mark);
+    line(markCs.width === '22px' && markCs.height === '22px', 'header mark is 22px',
+         markCs.width + ' x ' + markCs.height);
+    line(/\/logo\.svg$/.test(mark.getAttribute('src') || '') ||
+         (mark.getAttribute('src') || '').indexOf('data:image/') === 0,
+         'logo points at logo.svg (or the inline fallback)', mark.getAttribute('src').slice(0, 40));
+    line(mark.complete === false || mark.naturalWidth > 0 ||
+         (mark.getAttribute('src') || '').indexOf('data:') === 0,
+         'logo actually rendered (not a broken image)');
+    line(mark.getAttribute('alt') === '', 'logo is decorative (empty alt)');
+  }
+  var headH = sr.querySelector('.fs-head').getBoundingClientRect().height;
+  line(headH > 0 && headH < 44, 'header still under 44px with the mark', headH + 'px');
+  line(sr.querySelectorAll('.fs-msg .fs-mark, .fs-msg img').length === 0,
+       'no logo on assistant message cards');
+  line(sr.querySelectorAll('.fs-fab img, .fs-teaser img').length === 0,
+       'no logo on the FAB or teaser');
+
+  // Composer sits on the panel: no band, no divider.
+  var compCs = getComputedStyle(sr.querySelector('.fs-composer'));
+  line(parseFloat(compCs.borderTopWidth) === 0, 'composer has no border-top');
+  line(sr.querySelector('.fs-foot') === null, 'footer band removed');
+  line(sr.querySelector('.fs-callback') === null, 'call-back bar removed');
+
+  // Phase 5: teaser starts hidden and must never cover the FAB.
+  var tz = sr.querySelector('.fs-teaser');
+  line(!!tz && tz.hidden, 'teaser starts hidden');
+  line(!!tz && !tz.hasAttribute('aria-live'),
+       'teaser is not aria-live (no unsolicited screen-reader interruption)');
+
+  // Change 3: unread dot reflects stored history at boot.
+  var dot = sr.querySelector('.fs-unread');
+  var hasHistory = (JSON.parse(sessionStorage.getItem('fourskills.chat') || '[]') || []).length > 0;
+  line(!!dot && dot.hidden !== hasHistory,
+       'unread dot matches stored history', 'history=' + hasHistory + ' dotVisible=' + (dot && !dot.hidden));
+
+  // ---- fake keyboard: drives the same custom property the real one does
+  var kbState = document.getElementById('kbstate');
+  Array.prototype.forEach.call(document.querySelectorAll('[data-kb]'), function (b) {
+    b.addEventListener('click', function () {
+      var px = b.getAttribute('data-kb');
+      host.style.setProperty('--fs-kb', px + 'px');
+      kbState.textContent = '  --fs-kb = ' + px + 'px' +
+        (window.innerWidth >= 480 ? '  (no effect above 480px)' : '');
+    });
+  });
+
+  // ---- live teaser state -------------------------------------------------
+  // The teaser "not appearing" is almost always these two keys, not the timer.
+  // sessionStorage survives reloads within a tab, and opening the chat sets
+  // `done` — so one look at the panel silently retires the teaser for the whole
+  // session, and a plain refresh will not bring it back.
+  var maxCfg = new URLSearchParams(location.search).has('fast') ? 3 : 3;
+  function storedCount() {
+    try {
+      var raw = JSON.parse(sessionStorage.getItem('fourskills.chat') || '[]');
+      return Array.isArray(raw) ? raw.length : 0;
+    } catch (e) { return 0; }
+  }
+
+  function teaserState() {
+    var done = sessionStorage.getItem('fourskills.teaser.done');
+    var n = sessionStorage.getItem('fourskills.teaser.n');
+    var el = sr.querySelector('.fs-teaser');
+    var visible = el && !el.hidden;
+    var shown = n === null ? 0 : Number(n);
+    var blocked = done === '1' || shown >= maxCfg;
+    document.getElementById('teaserstate').innerHTML =
+      'stored messages         ' + storedCount() +
+        (storedCount() ? '   <span class="fail">← replies may be RESTORED, not new</span>' : '   <span class="pass">(clean session)</span>') + '
+' +
+      'fourskills.teaser.done   ' + (done === null ? '(not set)' : done) +
+      (done === '1' ? '   <span class="fail">← retired for this session</span>' : '') + '\n' +
+      'fourskills.teaser.n      ' + (n === null ? '(not set)' : n) + '\n' +
+      'appearances so far       ' + shown + ' of ' + maxCfg + '\n' +
+      'bubble on screen now     ' + (visible ? 'YES — "' + el.textContent.trim() + '"' : 'no') + '\n' +
+      'will another appear?     ' + (blocked
+        ? '<span class="fail">NO</span>'
+        : '<span class="pass">yes</span>');
+  }
+  teaserState();
+  setInterval(teaserState, 500);
+  // Fires a bubble immediately, ignoring every timer and the done flag. Uses
+  // the widget's own showTeaser(), so this exercises the real code path rather
+  // than poking the element from outside.
+  document.getElementById('showteaser').addEventListener('click', function () {
+    if (window.__fourskillsDebug) window.__fourskillsDebug.showTeaser();
+    else alert('Debug hook missing — is the dev server serving widget.js?');
+  });
+
+  document.getElementById('resetteaser').addEventListener('click', function () {
+    sessionStorage.removeItem('fourskills.teaser.done');
+    sessionStorage.removeItem('fourskills.teaser.n');
+    location.reload();
+  });
+
+  // Idempotency: a second injection must be a no-op.
+  var before = document.querySelectorAll('#fourskills-widget').length;
+  var s = document.createElement('script'); s.src = '/widget.js';
+  s.onload = function () {
+    var after = document.querySelectorAll('#fourskills-widget').length;
+    line(before === 1 && after === 1, 'double injection produces one widget', before + ' -> ' + after);
+    document.getElementById('report').innerHTML = out.join('\n');
+  };
+  s.onerror = function () { document.getElementById('report').innerHTML = out.join('\n'); };
+  document.body.appendChild(s);
+});
+</script>
+</body>
+</html>

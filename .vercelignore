@@ -1,0 +1,5 @@
+# Local host-page simulator. Useful in dev, has no business being on the
+# production domain.
+public/dev-test.html
+
+scripts/
