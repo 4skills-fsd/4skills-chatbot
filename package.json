@@ -10,11 +10,13 @@
   "scripts": {
     "dev": "node --env-file-if-exists=.env.local scripts/dev-server.js",
     "dev:kill": "node scripts/kill-port.js",
+    "health-check": "node scripts/health-check.js",
     "mock-groq": "node scripts/mock-groq.js",
     "mock-webhook": "node scripts/mock-webhook.js",
     "retrieval-check": "node scripts/retrieval-check.js",
     "render-check": "node scripts/render-check.js",
     "teaser-check": "node scripts/teaser-check.js",
+    "validation-check": "node scripts/validation-check.js",
     "prompt-check": "node --env-file-if-exists=.env.local scripts/prompt-check.js",
     "deploy": "vercel --prod"
   }

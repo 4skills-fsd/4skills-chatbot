@@ -100,23 +100,88 @@ website's code.
 
 ### 4. The assistant says it cannot reach the team
 
+> **This is the most likely thing to go wrong, and it has already happened once.**
+
 If visitors see:
 
 > I cannot reach the assistant at the moment. Please WhatsApp 0332 241 0155…
 
-that is the assistant failing safely — it hands the visitor the phone number rather than
-showing an error. The chat button and the practice-tests link keep working. Usual causes,
-in order of likelihood:
+the assistant is down. It is failing *politely* — the chat button, the practice-tests link
+and the WhatsApp number all still work — which is good for visitors and bad for you,
+because **an outage looks exactly like a quiet day**. Nothing on the site turns red.
 
-1. **The daily free allowance ran out.** Check [console.groq.com](https://console.groq.com)
-   → Usage. It resets at midnight UTC (5:00 AM Pakistan time). At current traffic this
-   should not happen; if it does regularly, traffic has grown and it is time to talk about
-   a paid plan.
-2. **The key was deleted or expired.** Follow step 3 above.
-3. **Groq is down.** Check [groqstatus.com](https://groqstatus.com). Nothing to do but wait.
+**Check it in ten seconds, any time:**
 
-Nothing is lost while this is happening — visitors are pointed at WhatsApp, which is where
-you wanted them anyway.
+```bash
+npm run health-check
+```
+
+It sends one message and tells you which model answered, or says plainly that none did.
+
+#### Cause 1: Groq retired a model (most likely)
+
+Groq removes AI models from service **without notice**. In August 2026 they removed two of
+the three this widget used, on the same day, and the assistant went down until the model
+list was changed.
+
+Nothing is broken in the code when this happens. The fix is to tell it which models to use
+now, and it is a settings change — **no developer, no code change, no redeploy of the
+website**:
+
+1. Go to [console.groq.com](https://console.groq.com) → **Models**. That page lists every
+   model currently available. (Or, if you prefer, the list is also at
+   [console.groq.com/docs/models](https://console.groq.com/docs/models).)
+2. Pick two or three, preferring the smaller/faster ones. Note their exact IDs — they look
+   like `openai/gpt-oss-20b`.
+3. Go to [vercel.com](https://vercel.com) → the `4skills-widget` project → **Settings** →
+   **Environment Variables** → edit **`GROQ_MODELS`**.
+4. Put the IDs in, separated by commas, best first:
+   `openai/gpt-oss-20b,openai/gpt-oss-120b,qwen/qwen3.6-27b`
+5. **Deployments** → most recent → **⋯** → **Redeploy**.
+6. Run `npm run health-check` again, or just open the site and say hello.
+
+The widget tries each model in turn, so listing three means two can disappear before
+visitors notice anything.
+
+> If a new model behaves oddly — wrong language, ignoring the format, inventing facts —
+> tell whoever maintains this. The wording the assistant follows was tuned for a specific
+> model and may need adjusting for a different one.
+
+#### Cause 2: the daily free allowance ran out
+
+Check [console.groq.com](https://console.groq.com) → Usage. It resets at midnight UTC
+(5:00 AM Pakistan time).
+
+#### Cause 3: Groq itself is down
+
+Check [groqstatus.com](https://groqstatus.com). Nothing to do but wait.
+
+### 4a. Being told automatically
+
+A daily automatic check runs at **6:00 AM UTC (11:00 AM Pakistan time)** and emails
+`NOTIFY_EMAIL` — the same address that gets the lead emails — if the assistant is not
+answering. The subject is **"4Skills website assistant is DOWN"**.
+
+**Be clear about what this does and does not cover.** Vercel's free plan allows a scheduled
+job to run **once per day, and no more often**. So:
+
+- If the assistant breaks just after the check runs, **you will not hear about it for
+  almost 24 hours**.
+- Visitors during that window get the WhatsApp number, not answers.
+- This is a safety net, not monitoring.
+
+If a day of silent downtime is not acceptable, the options are a Vercel Pro plan (which
+allows more frequent checks) or a free external uptime service — [UptimeRobot](https://uptimerobot.com)
+and similar will call `https://<your-vercel-url>/api/health` every five minutes and text or
+email you when it fails. The endpoint already returns a normal "healthy" or "failed"
+response for exactly that purpose. Neither is set up; both are a decision for the client.
+
+To set the automatic check up, add two environment variables in Vercel:
+
+| Variable | Value |
+|---|---|
+| `NOTIFY_EMAIL` | where the alert should go (usually the same as the leads email) |
+| `CRON_SECRET` | any long random string — stops strangers triggering the check |
 
 ### 5. Deploy a change
 
@@ -185,10 +250,12 @@ On Vercel, under Settings → Environment Variables:
 | Name | What it is |
 |---|---|
 | `GROQ_API_KEY` | The key from console.groq.com. Server-side only. |
-| `GROQ_MODELS` | Which AI models to use, in order. Change only on advice. |
+| `GROQ_MODELS` | Which AI models to use, in order. **Expect to change this** — see section 4. |
 | `ALLOWED_ORIGINS` | Which websites may use the assistant. Add a domain here if the site moves. |
 | `LEAD_WEBHOOK_URL` | The Google Sheet address that receives leads. |
 | `WHATSAPP_NUMBER` | Digits only, country code first: `923322410155`. |
+| `NOTIFY_EMAIL` | Where the daily "assistant is DOWN" alert goes. |
+| `CRON_SECRET` | Any long random string. Stops strangers triggering the daily check. |
 
 The leads sheet itself is set up from [docs/apps-script.gs](docs/apps-script.gs), which has
 step-by-step instructions at the top of the file.
@@ -204,8 +271,10 @@ all in **[CLAUDE.md](CLAUDE.md)**.
 cp .env.example .env.local     # add GROQ_API_KEY and LEAD_WEBHOOK_URL
 npm run dev                    # http://localhost:3000 — always this port
 npm run dev:kill               # frees port 3000 if something is holding it
+npm run health-check           # is the live assistant answering?
 npm run retrieval-check        # no key needed
 npm run render-check           # no key needed
+npm run teaser-check           # no key needed
 npm run prompt-check           # needs a real key, takes ~8 minutes
 ```
 

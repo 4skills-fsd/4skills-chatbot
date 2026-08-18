@@ -26,6 +26,7 @@ const PORT = 3000;
 const routes = {
   '/api/chat': () => import('../api/chat.js'),
   '/api/lead': () => import('../api/lead.js'),
+  '/api/health': () => import('../api/health.js'),
 };
 
 const contentTypes = {

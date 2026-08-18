@@ -13,29 +13,37 @@
 // refusal is graceful — print REVIEW with the full reply. An LLM assertion
 // suite that claims to auto-grade those is lying to you.
 //
-// PACING. Requests are spaced REQUEST_GAP_MS apart, 40s by default.
+// PACING. Requests are spaced REQUEST_GAP_MS apart, 32s by default.
 //
-// Each request is now ~3,160 prompt tokens plus ~150 out, and
-// llama-3.1-8b-instant has a 6,000 TPM free-tier ceiling — so the ceiling
-// allows about 1.8 requests per minute, not four. At the old 20s gap the suite
-// pushed ~9,900 TPM, drew 429s, and quietly measured gpt-oss-20b's behaviour
-// instead of the model production uses.
+// Derived, not guessed: the chain's TPM ceiling divided by the measured mean
+// request size. As of Aug 2026 that is 8,000 TPM and ~3,800 tokens per request,
+// so ~2.1 requests per minute, so ~29s minimum — 32s carries the jitter.
 //
-// THIS NUMBER GOES STALE. It was correct when the prompt was ~1,450 tokens and
-// silently wrong once it doubled. If a run reports non-primary models, divide
-// 6000 by the mean prompt tokens it printed and re-derive the gap.
+// THIS NUMBER GOES STALE, twice over: the prompt grows, and the chain changes.
+// It has already been wrong both ways — 20s when the prompt doubled (the suite
+// drew 429s and silently measured a fallback model instead of the primary), and
+// 40s after the ceiling rose from 6,000 to 8,000 (correct, just slow).
+//
+// TO RE-DERIVE: every run prints its mean prompt tokens and warns if any request
+// was served by a non-primary model. Take the TPM ceiling from CLAUDE.md, divide
+// by (mean + ~150 completion), and that is your requests per minute.
 //
 // Override with PROMPT_CHECK_GAP=0 only when pointed at a mock.
 //
 // THROTTLE. A full run is ~32 requests from one IP; api/chat.js allows 20 per
 // 10 minutes. Start the dev server with CHAT_THROTTLE_LIMIT=200 for a suite run.
 
+import { models } from '../lib/groq.js';
+
 const BASE = process.env.CHECK_URL || 'http://localhost:3000';
 const ORIGIN = process.env.CHECK_ORIGIN || 'http://localhost:3000';
 const REQUEST_GAP_MS =
-  process.env.PROMPT_CHECK_GAP !== undefined ? Number(process.env.PROMPT_CHECK_GAP) : 40000;
+  process.env.PROMPT_CHECK_GAP !== undefined ? Number(process.env.PROMPT_CHECK_GAP) : 32000;
 
-const PRIMARY_MODEL = (process.env.GROQ_MODELS || 'llama-3.1-8b-instant').split(',')[0].trim();
+// Read the real chain rather than restating it. This constant used to hardcode
+// `llama-3.1-8b-instant` as its default, and when that model was decommissioned
+// the suite would have reported every single request as "non-primary".
+const PRIMARY_MODEL = models()[0];
 
 const RS = /\bRs\.?\s?\d{1,3}(,\d{3})+|\b\d{2},000\b/g;
 const CLOCK = /\b\d{1,2}[:.]\d{2}\s?(am|pm)?\b/gi;

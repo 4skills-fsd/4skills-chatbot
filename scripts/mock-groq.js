@@ -4,7 +4,7 @@
 // MOCK_FAIL is a comma-separated list of `model:status` pairs. Anything not
 // listed answers 200.
 //
-//   MOCK_FAIL=llama-3.1-8b-instant:429,openai/gpt-oss-20b:503 \
+//   MOCK_FAIL=openai/gpt-oss-20b:429,openai/gpt-oss-120b:503 \
 //     node scripts/mock-groq.js
 //
 // Then point the backend at it:

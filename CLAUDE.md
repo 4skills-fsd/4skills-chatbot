@@ -32,44 +32,107 @@ prefilled WhatsApp link — both, not either.
 Backend talks to Groq with plain `fetch` against the OpenAI-compatible endpoint, not
 `groq-sdk` — nothing to keep updated.
 
-## Token budget — why the model choice is what it is
+## Token budget — and the model outage of Aug 2026
 
-Primary model is **`llama-3.1-8b-instant`**. Groq free-tier limits are per model and per
-org, and you hit whichever of RPM/RPD/TPM/TPD arrives first:
+**READ THIS BEFORE TRUSTING ANY MODEL ID IN THIS REPO.**
 
-| Model | RPM | RPD | TPM | TPD |
-|---|---|---|---|---|
-| `llama-3.1-8b-instant` | 30 | **14,400** | 6,000 | **500,000** |
-| `openai/gpt-oss-20b` | 30 | 1,000 | 8,000 | 200,000 |
-| `openai/gpt-oss-120b` | 30 | 1,000 | 8,000 | 200,000 |
-| `llama-3.3-70b-versatile` | 30 | 1,000 | 12,000 | 100,000 |
+In August 2026 Groq decommissioned the entire Llama family. `llama-3.1-8b-instant`
+(the primary) and `llama-3.3-70b-versatile` (the last fallback) both began returning
+`404 model_not_found` on the same day. The widget did not go dark only because the middle
+entry survived — and at that moment it was rate-limited, so visitors got the WhatsApp
+fallback instead of an answer.
 
-At ~50 visitors/day, ~20% opening the chat, ~6 turns each → ~60 requests/day ≈ 100K
-tokens/day, about 20% of the 8B model's daily budget. Traffic can 5× before the free tier
-is a problem. `llama-3.3-70b-versatile` would be exhausted at today's traffic and its
-1,000 RPD would cap the site at ~160 conversations/day permanently.
+The chain did its job. The lesson is that **a model ID is a perishable fact**. Verify
+before assuming:
 
-**The real risk is TPM, not TPD.** 6,000 tokens/min at ~2,883 tokens/request is only ~2
-concurrent requests per minute. The prompt has roughly doubled since the first estimate as
-rules were added; that headroom is now the tightest number in the project. Hence, non-negotiably:
+```bash
+curl -H "Authorization: Bearer $GROQ_API_KEY" https://api.groq.com/openai/v1/models
+```
+
+Current chain, confirmed live from `x-ratelimit-*` response headers:
+
+| Model | Requests/day | TPM | Notes |
+|---|---|---|---|
+| `openai/gpt-oss-20b` | 1,000 | 8,000 | primary — smallest, so fastest |
+| `openai/gpt-oss-120b` | 1,000 | 8,000 | fallback |
+| `qwen/qwen3.6-27b` | 1,000 | 8,000 | fallback |
+
+`groq/compound` and `groq/compound-mini` also exist on this key but are agentic
+tool-using systems, not plain chat models — do not put them in the chain.
+
+**RPD is no longer the comfortable number it was.** The old 8B model allowed 14,400
+requests/day; these allow 1,000. At ~60 requests/day that is still 16× headroom, so it is
+not urgent — but a 5× traffic increase now lands at 300/day, not 300/14,400.
+
+**TPD is NOT reported in the response headers and is therefore unverified.** The old table
+in this file claimed 200K/day for these models; that table also claimed two models existed
+that do not, so treat the figure as unconfirmed. At ~3,800 tokens per request, a 200K daily
+cap would allow only ~52 requests/day — right on top of the ~60/day estimate. **Confirm the
+real TPD with the client's Groq dashboard before launch.** This is the single most likely
+capacity surprise in the project.
+
+TPM is 8,000, up from 6,000. At ~3,800 tokens per request that is ~2 concurrent requests
+per minute. Hence, non-negotiably:
 
 - Retrieve **top 3–4** FAQ entries. Never stuff all of `knowledge.json` into the prompt.
 - Cap history sent to the model at the **last 6 messages**.
 - Hard-cap `max_tokens` at **420**.
 - Reject user messages over 500 chars client-side with a friendly nudge.
 
-Fallback chain on 429/5xx: `llama-3.1-8b-instant` → `openai/gpt-oss-20b` →
-`llama-3.3-70b-versatile`. All three fail → graceful message offering WhatsApp, never a
-raw error. Chain lives in `GROQ_MODELS` so models can be swapped without touching code
-(Groq deprecates model IDs on a rolling basis). Active model is echoed in a response
-header for debugging.
+Fallback chain on 429/5xx **and on 404** — a retired ID returns 404, not 429, so
+`groq.js` treats any non-ok status as a reason to try the next model. All three fail →
+graceful message offering WhatsApp, never a raw error. The chain lives in `GROQ_MODELS`
+so it can be repaired from the Vercel dashboard without a code change. The serving model
+is echoed in `x-fs-model`.
+
+### The new primary is a reasoning model, and that nearly broke it silently
+
+`openai/gpt-oss-*` spend tokens thinking before they answer, and that thinking comes out of
+`max_tokens`. Measured on a request asking for a five-item list at `max_tokens: 420`:
+
+```
+finish_reason  length
+completion     420 tokens, of which reasoning 405
+content        29 characters
+```
+
+The visitor gets nothing. Worse, `groq.js` correctly treats an empty completion as a
+failure and moves down the chain, so the symptom is "the bot is slow and then falls back"
+rather than anything pointing at token budgets.
+
+`REASONING_EFFORT` in `lib/groq.js` sets `reasoning_effort: 'low'` for the gpt-oss models.
+The same request then used **19** reasoning tokens, finished cleanly, and answered fully in
+124 completion tokens — fewer tokens and a better answer. The parameter is only sent to
+models listed in that map, so an unfamiliar model gets a plain request instead of a 400.
+
+**If you add a model to the chain, check whether it reasons.** `qwen/qwen3.6-27b` does not,
+but it is verbose — it ran past `max_tokens: 420` on the same prompt and needed
+`reasoning_effort: 'none'` to stop at a sensible length.
+
+**The prompt was tuned against `llama-3.1-8b-instant`, which no longer exists — and has
+now been re-verified against `openai/gpt-oss-20b`.** Full `prompt-check` run, 17 Aug 2026,
+36 requests: **209 passed, 2 failed.** Every behavioural finding recorded below — the bullet
+shape, the language directive position, the lead marker, the refusal rules — was originally
+measured on a model that is gone, and all of it carried over. The five liability refusals
+(band prediction, essay grading, visa advice, university acceptance, unconfirmed fees) all
+hold on the new model.
+
+The two failures were both benign and neither is a behaviour regression:
+
+- *"under 25 words — 57 words"*: the reply was a correct three-bullet enrolment answer that
+  then opened the lead form. The 25-word assertion assumes the pre-form line is the whole
+  reply; here the visitor's question deserved an answer first. **Answer-first beat the
+  assertion, which is the priority this project wants** — see "Answer first" in the prompt.
+- *"second identical request reports cached tokens"*: see the caching section below.
+
+Re-run this suite after any model swap. It is the only thing that catches a new model
+quietly ignoring a refusal rule, and refusals are the ones with legal exposure.
 
 ## Prompt caching — why message order is load-bearing
 
-Groq does not count prompt-cache hits toward the rate limits. `STATIC_PROMPT` is 9,935
-characters (~2,483 tokens) and identical on every request, so caching it is the
-difference between roughly 2 and 5 requests per minute of headroom against the 6,000
-TPM ceiling.
+Groq does not count prompt-cache hits toward the rate limits. `STATIC_PROMPT` is identical
+on every request, so caching it is the difference between roughly 2 and 5 requests per
+minute of headroom against the **8,000** TPM ceiling.
 
 Caching only fires on a **byte-identical prefix**. That is why `buildMessages()`
 assembles:
@@ -85,19 +148,27 @@ assembles:
 Retrieved FAQ material and the per-turn language directive both go **after** message zero,
 never interpolated into it. Never put a timestamp, session id, visitor name or page URL in
 message zero — anything that varies breaks the cache for every visitor, not just that one.
-Measured: 1,536 cached tokens on the second of two identical back-to-back requests.
 
-**Groq's cache TTL is shorter than the gap between real visitor requests, so caching will
-rarely fire in production. Budget every request at the full ~2,000 tokens.** Measured: two
-identical requests 20s apart report 0 cached; back to back they report 1,536. Real traffic
-at ~60 requests/day arrives minutes apart, so treat any cache hit as a bonus and never as a
-line in the capacity maths. `prompt-check` fires its cache pair back to back for exactly
-this reason — it is verifying the prefix is stable, not predicting production savings.
+**Groq's caching is best-effort, and on `gpt-oss-20b` it mostly does not fire. Budget every
+request at the full ~3,650 tokens and treat any hit as a bonus.** Measured over the 17 Aug
+2026 run of 31 scored requests: **3 reported a cache hit, 28 reported zero** — and the
+dedicated back-to-back cache pair was one of the zeros, which is why `prompt-check` shows a
+`FAIL` on "second identical request reports cached tokens". That assertion is checking a
+best-effort feature and will flap. It is **not** evidence of prefix drift.
 
-**`llama-3.1-8b-instant` stays primary. `openai/gpt-oss-20b` is a fallback, not a
-replacement.** At 200K TPD and ~2,000 tokens per request it would cap the site at about 100
-conversations a day; the 8B model's 500K TPD is the only one of the chain that carries the
-traffic. Do not promote a fallback to primary to fix model behaviour.
+The assertion that actually detects drift is the one beside it — *"identical payloads
+produce identical prompt tokens"* — and it passed (3,666 vs 3,666). The hits that did land
+were 3,328 tokens against a 3,666-token prompt, about 91%, which is the prefix being cached
+exactly as designed. **Read those two assertions together: identical-token PASS plus
+cached-token FAIL means the prefix is fine and Groq simply did not serve the cache. An
+identical-token FAIL is the one to panic about.**
+
+Real traffic at ~60 requests/day arrives minutes apart, so caching was never in the capacity
+maths anyway.
+
+**Do not promote a fallback to primary to fix model BEHAVIOUR.** If a reply is wrong, fix
+the prompt or the knowledge entry — swapping models hides the cause and moves the daily
+budget. (This rule did not apply to the Aug 2026 swap: the primary had ceased to exist.)
 
 ## Language is decided in code, not by the prompt
 
@@ -173,7 +244,7 @@ npm run prompt-check        # REQUIRES a real GROQ_API_KEY
 can be exercised without burning quota or deliberately exhausting one:
 
 ```bash
-MOCK_FAIL="llama-3.1-8b-instant:429,openai/gpt-oss-20b:503" npm run mock-groq
+MOCK_FAIL="openai/gpt-oss-20b:429,openai/gpt-oss-120b:503" npm run mock-groq
 GROQ_BASE_URL=http://localhost:4010/openai/v1 GROQ_API_KEY=test npm run dev
 ```
 
@@ -486,9 +557,18 @@ invents something, check first whether retrieval left it with nothing to say.** 
 rule tells it what not to do; a knowledge entry tells it what to do instead, and the second
 works far better on an 8B model.
 
-**Prompt size has grown** from ~1,340 to ~1,900 tokens as rules were added, putting whole
-requests at ~2,000 tokens. At the 6,000 TPM ceiling that is about three concurrent requests
-per minute, down from four. Worth watching before adding more rules.
+**Prompt size is now the tightest number in the project.** Measured on the 17 Aug 2026 run:
+whole requests are **3,550–3,823 tokens (mean 3,652)**, up from ~2,000 before the rules and
+worked examples were added, and counted by a different tokenizer than the old figures were.
+
+At the **8,000 TPM** ceiling that is **two concurrent requests per minute**, down from three.
+Two visitors typing at the same moment is now the limit, and a third gets the fallback chain.
+
+Before adding another rule or worked example, delete one. The prompt has roughly doubled
+across this project's life and every addition is now paid for in concurrency. If a
+behaviour needs fixing, prefer a `knowledge.json` entry — it costs ~40 tokens on the
+requests that retrieve it and **zero on the ones that don't**, whereas a prompt rule is
+charged on every single request forever.
 
 ## Do not
 

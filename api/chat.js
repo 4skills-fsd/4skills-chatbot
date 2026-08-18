@@ -16,7 +16,12 @@ import {
   throttle,
 } from '../lib/guard.js';
 
+// What a visitor may type in one message.
 const MAX_MESSAGE_CHARS = 500;
+// What an assistant turn replayed from the client's history may be. Deliberately
+// far above anything max_tokens:420 can produce (~1,600 chars) — this is an
+// anti-abuse ceiling on a spoofed transcript, NOT a limit on real replies.
+const MAX_REPLY_CHARS = 4000;
 const MAX_MESSAGES = 20;
 /*
  * Throttling is keyed on the SESSION, with a loose per-IP backstop.
@@ -67,7 +72,7 @@ function stripMarker(text) {
 }
 
 /** Keep only the fields we send on, and only well-formed turns. */
-function sanitiseMessages(input) {
+export function sanitiseMessages(input) {
   if (!Array.isArray(input)) return { error: 'messages_must_be_array' };
   if (input.length === 0) return { error: 'messages_empty' };
   if (input.length > MAX_MESSAGES) return { error: 'too_many_messages' };
@@ -78,7 +83,28 @@ function sanitiseMessages(input) {
     const role = m.role === 'assistant' ? 'assistant' : 'user';
     const content = m.content.trim();
     if (!content) continue;
-    if (content.length > MAX_MESSAGE_CHARS) return { error: 'message_too_long' };
+
+    /*
+     * The 500-char limit is a limit on what a VISITOR may type. It must never
+     * be applied to the assistant's own replies.
+     *
+     * This loop used to check every message in the array. The widget posts the
+     * whole conversation each turn, and `max_tokens: 420` lets a reply reach
+     * ~1,600 characters — so the first time the bot answered at any length,
+     * every subsequent request was rejected with "shorten to under 500
+     * characters" no matter how short the visitor's message was. A 14-character
+     * message was refused. Reproduced in scripts/validation-check.js.
+     *
+     * Assistant turns get a much larger ceiling instead. They are already
+     * bounded by max_tokens on the way out, but the history arrives from the
+     * client and is therefore spoofable, so a generous cap keeps a forged
+     * transcript from stuffing the prompt.
+     */
+    const limit = role === 'user' ? MAX_MESSAGE_CHARS : MAX_REPLY_CHARS;
+    if (content.length > limit) {
+      return { error: role === 'user' ? 'message_too_long' : 'reply_too_long' };
+    }
+
     out.push({ role, content });
   }
 

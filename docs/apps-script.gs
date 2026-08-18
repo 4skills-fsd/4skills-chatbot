@@ -84,6 +84,13 @@ function setupHeaders() {
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
+
+    // The widget's daily health check calls in here when the assistant is down.
+    // It is NOT a lead, so it must not add a row.
+    if (data.type === 'health-alert') {
+      return healthAlert_(data);
+    }
+
     var sheet = getSheet_();
 
     if (sheet.getLastRow() === 0) {
@@ -115,6 +122,48 @@ function doPost(e) {
   } catch (err) {
     // Logged to Apps Script's execution log, visible under "Executions".
     console.error('lead append failed: ' + err);
+    return json_({ ok: false, error: String(err) });
+  }
+}
+
+/**
+ * The assistant is not answering. Tell someone.
+ *
+ * Sent by api/health.js, which Vercel's cron calls once a day. Once a day is
+ * the Hobby-plan ceiling, so treat this as "you will hear within 24 hours",
+ * not as monitoring.
+ */
+function healthAlert_(data) {
+  try {
+    var to = data.to || NOTIFY_EMAIL;
+    if (!to) {
+      console.error('health alert received but no NOTIFY_EMAIL is set');
+      return json_({ ok: false, error: 'no recipient' });
+    }
+    MailApp.sendEmail({
+      to: to,
+      subject: '4Skills website assistant is DOWN',
+      body: [
+        'The chat assistant on 4skills.co is not answering.',
+        '',
+        'Visitors are being shown the WhatsApp number instead of answers.',
+        'The chat button and the practice-tests link still work.',
+        '',
+        'Time:  ' + (data.timestamp || ''),
+        'Build: ' + (data.build || ''),
+        '',
+        'What the models said:',
+        data.detail || '(no detail)',
+        '',
+        'Most likely cause: Groq retired a model. See "If the assistant stops',
+        'answering" in the project README — the fix is usually editing',
+        'GROQ_MODELS in the Vercel dashboard, with no code change.',
+        '',
+      ].join('\n'),
+    });
+    return json_({ ok: true, alerted: true });
+  } catch (err) {
+    console.error('health alert email failed: ' + err);
     return json_({ ok: false, error: String(err) });
   }
 }
