@@ -333,11 +333,18 @@ Other things that are load-bearing, not incidental:
   Model output is untrusted: parse it as HTML once and a reply containing a tag becomes
   markup on a school's website. `npm run render-check` proves this without a browser,
   including `<script>` and `<img onerror>` payloads rendering as inert text.
-- **Links are allowlisted, not validated.** Only four URLs become anchors; anything else the
+- **Links are allowlisted, not validated.** Only five URLs become anchors; anything else the
   model emits renders as plain text. A lookalike (`https://4skills.app.evil.com`) and a
   hallucinated path (`https://4skills.co/pricing`) are both covered by tests. An 8B model
   inventing a plausible URL is a matter of when, not whether — and a visitor cannot click
   text. `data-practice-url` is likewise assigned as a property and rejected unless `http(s)`.
+
+  **Adding a URL the bot can share takes FOUR edits, not one:** `LINK_ALLOWLIST` in
+  `public/widget.js`, its duplicates in `scripts/render-check.js` and
+  `scripts/prompt-check.js`, and the link list in `lib/prompt.js` — which ends "never share
+  any address other than these N" and will otherwise instruct the model to suppress the URL
+  entirely, so the allowlist never even gets a chance to reject it. Miss the allowlist and
+  the URL renders as dead plain text; miss the prompt and it never appears at all.
 - **`role="dialog"` with a Tab trap, and deliberately no `aria-modal`.** Focus is trapped
   for keyboard users, but the host background is *not* inert — making it inert would mean
   touching the host document, which the constraints forbid. Some screen readers treat

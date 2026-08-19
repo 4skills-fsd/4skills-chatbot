@@ -28,6 +28,15 @@ const CASES = [
   ['do you teach letter writing', 'gt-letter-writing'],
   ['how is my writing checked', 'writing-speaking-feedback'],
   ['should I take ielts or pte', 'ielts-vs-pte'],
+  ['how do I register for my ielts test', 'test-registration'],
+  ['are you an official partner of idp', 'partnerships-certifications'],
+  // Who FOUNDED it and who TEACHES it are different questions with different
+  // entries, and founder-director carries `teacher`/`ustad` in its keywords, so
+  // the split is one keyword edit away from collapsing. There is no stemmer:
+  // `teaches` matches only because it is listed on `trainers` verbatim.
+  ['who is the founder', 'founder-director'],
+  ['who is the director', 'founder-director'],
+  ['who teaches the IELTS class', 'trainers'],
   // "IT" only survives as part of a phrase — it is a stopword on its own. These
   // guard the pre-stopword phrase matching in retrieve.js.
   ['how much is the IT course', 'unconfirmed-course-fees'],
@@ -45,6 +54,7 @@ const CASES = [
   ['kitne students hote hain aik class mein', 'batch-size'],
   ['online class ho sakti hai', 'online-classes'],
   ['mujhe jaldi test dena hai', 'fast-track'],
+  ['4skills ka malik kaun hai', 'founder-director'],
 ];
 
 // Queries that SHOULD return nothing. Passing four irrelevant entries is worse

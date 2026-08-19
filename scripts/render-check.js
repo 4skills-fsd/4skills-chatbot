@@ -2,7 +2,7 @@
 //
 // Exercises the assistant-reply renderer in public/widget.js against a minimal
 // DOM shim, so the security-relevant behaviour is provable without a browser:
-// model output must never become markup, and only the four allowlisted URLs may
+// model output must never become markup, and only the five allowlisted URLs may
 // become links. Run it after any change to renderRich/appendInline/appendWithLinks.
 //
 // It reads the functions straight out of widget.js rather than importing them —
@@ -60,7 +60,8 @@ const LINK_ALLOWLIST = [
   'https://4skills.app',
   'https://www.youtube.com/@4SKILLS256',
   'https://4skills.co/faq',
-  'https://4skills.co/success-stories-ielts'
+  'https://4skills.co/success-stories-ielts',
+  'https://maps.app.goo.gl/iGJmsU1VvnyZCYcH6'
 ];
 const URL_PATTERN = /https?:\/\/[^\s<>()\[\]"']+/g;
 // Constants the extracted functions close over in widget.js. Read out of the
@@ -113,6 +114,11 @@ t('javascript: url not linkified', 'javascript:alert(1)', '<p>javascript:alert(1
 t('link inside bold still allowlisted', '**https://4skills.app**',
   '<p><strong><a href="https://4skills.app" target="_blank" rel="noopener noreferrer">https://4skills.app</a></strong></p>');
 t('blank lines collapse', 'One\n\nTwo', '<p>One</p><p>Two</p>');
+t('maps link is allowlisted', 'View on Google Maps: https://maps.app.goo.gl/iGJmsU1VvnyZCYcH6',
+  '<p>View on Google Maps: <a href="https://maps.app.goo.gl/iGJmsU1VvnyZCYcH6" target="_blank" rel="noopener noreferrer">https://maps.app.goo.gl/iGJmsU1VvnyZCYcH6</a></p>');
+// Only THIS maps URL. A different short link is someone else's pin.
+t('a different maps short link stays plain text', 'See https://maps.app.goo.gl/somethingElse here',
+  '<p>See https://maps.app.goo.gl/somethingElse here</p>');
 
 // The prompt asks for "- ", but the model drifts to "* " on longer lists. Both
 // must render as a list, or the panel shows literal asterisks to the visitor.

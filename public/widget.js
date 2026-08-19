@@ -744,7 +744,8 @@
     'https://4skills.app',
     'https://www.youtube.com/@4SKILLS256',
     'https://4skills.co/faq',
-    'https://4skills.co/success-stories-ielts'
+    'https://4skills.co/success-stories-ielts',
+    'https://maps.app.goo.gl/iGJmsU1VvnyZCYcH6'
   ];
 
   var URL_PATTERN = /https?:\/\/[^\s<>()\[\]"']+/g;

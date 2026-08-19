@@ -325,6 +325,7 @@ const LINK_ALLOWLIST = [
   'https://www.youtube.com/@4SKILLS256',
   'https://4skills.co/faq',
   'https://4skills.co/success-stories-ielts',
+  'https://maps.app.goo.gl/iGJmsU1VvnyZCYcH6',
 ];
 const URL_PATTERN = /https?:\/\/[^\s<>()[\]"']+/g;
 
