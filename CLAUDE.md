@@ -64,12 +64,36 @@ tool-using systems, not plain chat models — do not put them in the chain.
 requests/day; these allow 1,000. At ~60 requests/day that is still 16× headroom, so it is
 not urgent — but a 5× traffic increase now lands at 300/day, not 300/14,400.
 
-**TPD is NOT reported in the response headers and is therefore unverified.** The old table
-in this file claimed 200K/day for these models; that table also claimed two models existed
-that do not, so treat the figure as unconfirmed. At ~3,800 tokens per request, a 200K daily
-cap would allow only ~52 requests/day — right on top of the ~60/day estimate. **Confirm the
-real TPD with the client's Groq dashboard before launch.** This is the single most likely
-capacity surprise in the project.
+**TPD IS 200,000 PER MODEL PER DAY. CONFIRMED 19 Aug 2026, and it is the binding
+constraint on this project — not RPD, not TPM.**
+
+It is still not in the response headers. It was confirmed the hard way, from the body of a
+live 429:
+
+```
+Rate limit reached for model `openai/gpt-oss-20b` ... service tier `on_demand`
+on tokens per day (TPD): Limit 200000, Used 196978
+```
+
+At the measured mean of ~3,750 tokens per request that is **~53 requests per day per
+model, ~160 across the whole chain**. The estimate for real traffic is ~60/day. So the
+primary alone covers roughly one ordinary day, and the fallback chain — which exists for
+outages — is silently doubling as the daily capacity plan. **There is no 16× headroom.
+The RPD figure of 1,000/day above is irrelevant; the token cap binds at ~53.**
+
+What this looks like when you hit it: every model 429s in turn and visitors get the
+WhatsApp fallback. It does not announce itself as a quota problem.
+
+**A full `prompt-check` run costs ~135,000 tokens — 68% of one model's entire day.** Two
+runs exhaust the primary, a third exhausts the primary and the first fallback. That is
+exactly what happened on 19 Aug 2026: run 1 was clean at 36/36 on the primary, run 2 came
+back 27/36 on fallbacks, run 3 came back 34/36 — and increasing the pacing gap made it
+*worse*, because a daily cap does not care about spacing. **If a run reports mass fallback,
+check TPD before touching `PROMPT_CHECK_GAP`.** Budget one suite run per day, and do not
+schedule one on a day the client is demoing.
+
+**Raise this with the client before launch.** A Groq paid tier is the fix; the code needs
+no change.
 
 TPM is 8,000, up from 6,000. At ~3,800 tokens per request that is ~2 concurrent requests
 per minute. Hence, non-negotiably:

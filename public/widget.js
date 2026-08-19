@@ -750,6 +750,30 @@
 
   var URL_PATTERN = /https?:\/\/[^\s<>()\[\]"']+/g;
 
+  /*
+   * The Google Maps link is the one link the widget MANUFACTURES rather than
+   * passes through, and it is deliberately not in the system prompt at all.
+   *
+   * The other four allowlisted URLs are human-readable — the model reproduces
+   * "https://4skills.co/faq" reliably because it is words. A Maps short code is
+   * 17 characters of opaque base62, and on the most-asked question on the site
+   * the model dropped one of them: it wrote ...VvnyZCYh6 where the real code is
+   * ...VvnyZCYcH6. The allowlist did its job and refused to linkify the result,
+   * so nothing pointed anywhere wrong — but the visitor got a dead string in
+   * the middle of the office address. That is a transcription task no language
+   * model should be given.
+   *
+   * So the model is told to write the address and nothing else, and the link is
+   * appended here from a constant that cannot be mistyped.
+   *
+   * Matched on the plaza name: it is distinctive, appears in no other knowledge
+   * entry, and survives the model reflowing the address into bullets or prose
+   * or translating the surrounding sentence into Roman Urdu.
+   */
+  var OFFICE_ADDRESS = /kohinoor one plaza/i;
+  var MAPS_URL = 'https://maps.app.goo.gl/iGJmsU1VvnyZCYcH6';
+  var MAPS_LABEL = 'View on Google Maps';
+
   /** Append `text`, turning only allowlisted URLs into anchors. */
   function appendWithLinks(target, text) {
     var last = 0;
@@ -911,6 +935,26 @@
       appendInline(p, lines[i]);
       el.appendChild(p);
       i++;
+    }
+
+    /*
+     * Append the maps link once, if this reply gave the office address.
+     *
+     * Once per MESSAGE, not once per match — the address can appear twice in a
+     * long reply (bulleted, then repeated in a closing line) and two identical
+     * links would read as a rendering bug. Hence this sits outside the loop.
+     *
+     * The indexOf guard covers the case where the model emits the URL anyway,
+     * from an older cached prompt or a stored history turn written before this
+     * change. Note it only suppresses an EXACT match: if the model emits a
+     * corrupted code, that stays inert plain text (the allowlist rejects it)
+     * and the visitor still gets a working link from us underneath.
+     */
+    if (OFFICE_ADDRESS.test(text) && String(text).indexOf(MAPS_URL) === -1) {
+      var mapsP = document.createElement('p');
+      mapsP.className = 'fs-p';
+      appendWithLinks(mapsP, MAPS_LABEL + ': ' + MAPS_URL);
+      el.appendChild(mapsP);
     }
 
     // A reply that was only whitespace would otherwise render as nothing.

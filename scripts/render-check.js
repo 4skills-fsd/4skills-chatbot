@@ -70,14 +70,20 @@ const BULLET = new RegExp(src.match(/var BULLET = \/(.+?)\/;/)[1]);
 const LABEL = new RegExp(src.match(/var LABEL = \/(.+?)\/;/)[1]);
 const TYPED_FORM = new RegExp(src.match(/var TYPED_FORM = \/(.+?)\/;/)[1]);
 const EMPTY_FIELD = new RegExp(src.match(/var EMPTY_FIELD = \/(.+?)\/i;/)[1], 'i');
+// The maps constants are read out of widget.js too. If the short code is ever
+// corrected there, these tests must move with it rather than pass against a
+// stale copy — the whole point of this link is that exactly one literal exists.
+const OFFICE_ADDRESS = new RegExp(src.match(/var OFFICE_ADDRESS = \/(.+?)\/i;/)[1], 'i');
+const MAPS_URL = src.match(/var MAPS_URL = '([^']+)';/)[1];
+const MAPS_LABEL = src.match(/var MAPS_LABEL = '([^']+)';/)[1];
 const window = { console: { warn() {} } };
 const fn = new Function(
   'document', 'LINK_ALLOWLIST', 'URL_PATTERN', 'BULLET', 'LABEL',
-  'TYPED_FORM', 'EMPTY_FIELD', 'window',
+  'TYPED_FORM', 'EMPTY_FIELD', 'OFFICE_ADDRESS', 'MAPS_URL', 'MAPS_LABEL', 'window',
   code + '; return {renderRich};',
 );
 const { renderRich } = fn(document, LINK_ALLOWLIST, URL_PATTERN, BULLET, LABEL,
-  TYPED_FORM, EMPTY_FIELD, window);
+  TYPED_FORM, EMPTY_FIELD, OFFICE_ADDRESS, MAPS_URL, MAPS_LABEL, window);
 
 function render(t) { const el = new Node2('div'); renderRich(el, t); return el; }
 
@@ -119,6 +125,37 @@ t('maps link is allowlisted', 'View on Google Maps: https://maps.app.goo.gl/iGJm
 // Only THIS maps URL. A different short link is someone else's pin.
 t('a different maps short link stays plain text', 'See https://maps.app.goo.gl/somethingElse here',
   '<p>See https://maps.app.goo.gl/somethingElse here</p>');
+
+// --- the maps link the WIDGET appends -------------------------------------
+//
+// The model is no longer asked to write this URL at all: it corrupted the short
+// code once already (...VvnyZCYh6 for ...VvnyZCYcH6) and a visitor cannot click
+// a dead string. The address triggers it; the URL is a constant.
+const MAPS_P =
+  `<p>${MAPS_LABEL}: <a href="${MAPS_URL}" target="_blank" rel="noopener noreferrer">${MAPS_URL}</a></p>`;
+
+t('address appends exactly one maps link',
+  'Our office:\n\n- 96-97A First Floor, Kohinoor One Plaza\n- Jaranwala Road, Faisalabad',
+  '<p>Our office:</p><ul><li><span>96-97A First Floor, Kohinoor One Plaza</span></li>' +
+  '<li><span>Jaranwala Road, Faisalabad</span></li></ul>' + MAPS_P);
+t('no address appends no maps link', 'IELTS Academic is Rs 35,000.',
+  '<p>IELTS Academic is Rs 35,000.</p>');
+// Twice in one reply is one link, not two — once per message, not per match.
+t('address twice still appends one link',
+  'Kohinoor One Plaza is our office.\nVisit Kohinoor One Plaza any weekday.',
+  '<p>Kohinoor One Plaza is our office.</p><p>Visit Kohinoor One Plaza any weekday.</p>' + MAPS_P);
+// A stored history turn from before this change already carries the URL.
+t('reply already containing the URL gets no duplicate',
+  'Kohinoor One Plaza. View on Google Maps: ' + MAPS_URL,
+  `<p>Kohinoor One Plaza. View on Google Maps: <a href="${MAPS_URL}" target="_blank" rel="noopener noreferrer">${MAPS_URL}</a></p>`);
+// A CORRUPTED code is not the URL, so we still append the real one — and the
+// mistyped string stays inert text because the allowlist rejects it.
+t('corrupted code stays inert and the real link is still appended',
+  'Kohinoor One Plaza. See https://maps.app.goo.gl/iGJmsU1VvnyZCYh6',
+  '<p>Kohinoor One Plaza. See https://maps.app.goo.gl/iGJmsU1VvnyZCYh6</p>' + MAPS_P);
+t('address in Roman Urdu prose still triggers it',
+  'Hamara office Kohinoor One Plaza, Jaranwala Road par hai.',
+  '<p>Hamara office Kohinoor One Plaza, Jaranwala Road par hai.</p>' + MAPS_P);
 
 // The prompt asks for "- ", but the model drifts to "* " on longer lists. Both
 // must render as a list, or the panel shows literal asterisks to the visitor.

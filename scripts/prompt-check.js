@@ -13,16 +13,36 @@
 // refusal is graceful — print REVIEW with the full reply. An LLM assertion
 // suite that claims to auto-grade those is lying to you.
 //
-// PACING. Requests are spaced REQUEST_GAP_MS apart, 32s by default.
+// PACING. Requests are spaced REQUEST_GAP_MS apart, 45s by default.
 //
 // Derived, not guessed: the chain's TPM ceiling divided by the measured mean
-// request size. As of Aug 2026 that is 8,000 TPM and ~3,800 tokens per request,
-// so ~2.1 requests per minute, so ~29s minimum — 32s carries the jitter.
+// request size. As of Aug 2026 that is 8,000 TPM and ~3,760 prompt + ~150
+// completion tokens per request, so ~2.0 requests per minute.
+//
+// 32s was that quotient with no margin at all — 1.9 req/min x 3,910 tokens is
+// 7,400 against a ceiling of 8,000, and the suite has two deliberately
+// unpaced back-to-back requests in the cache test. It held for one run at mean
+// 3,754 tokens and collapsed on the next at mean 3,761: 27 of 36 requests were
+// served by a fallback model and two came back degraded. A suite that quietly
+// measures the wrong model is worse than no suite, so the gap now buys real
+// headroom (45s is ~1.33 req/min, ~5,200 tokens/min) at the cost of ~7 minutes.
+//
+// BEFORE YOU RAISE THE GAP AGAIN, CHECK TPD. Mass fallback is far more often a
+// daily-token problem than a per-minute one, and the two look identical from
+// here — every request 429s and the chain slides down to a model production
+// will not use. Groq's cap is 200,000 tokens per model per day, which at ~3,750
+// tokens a request is ~53 requests; ONE run of this suite is ~135,000 tokens,
+// or 68% of that. Two runs in a day exhaust the primary. On 19 Aug 2026 the gap
+// was raised 32s -> 45s against exactly this symptom and the next run came back
+// WORSE (34/36 non-primary vs 27/36), because spacing does nothing to a daily
+// budget. The reason is in the 429 body, which the dev server logs in full.
 //
 // THIS NUMBER GOES STALE, twice over: the prompt grows, and the chain changes.
-// It has already been wrong both ways — 20s when the prompt doubled (the suite
-// drew 429s and silently measured a fallback model instead of the primary), and
-// 40s after the ceiling rose from 6,000 to 8,000 (correct, just slow).
+// It has already been wrong three times — 20s when the prompt doubled (the
+// suite drew 429s and silently measured a fallback model instead of the
+// primary), 40s after the ceiling rose from 6,000 to 8,000 (correct, just
+// slow), and 32s as above. Every one of those was a margin problem, never an
+// arithmetic problem. Leave margin.
 //
 // TO RE-DERIVE: every run prints its mean prompt tokens and warns if any request
 // was served by a non-primary model. Take the TPM ceiling from CLAUDE.md, divide
@@ -38,7 +58,7 @@ import { models } from '../lib/groq.js';
 const BASE = process.env.CHECK_URL || 'http://localhost:3000';
 const ORIGIN = process.env.CHECK_ORIGIN || 'http://localhost:3000';
 const REQUEST_GAP_MS =
-  process.env.PROMPT_CHECK_GAP !== undefined ? Number(process.env.PROMPT_CHECK_GAP) : 32000;
+  process.env.PROMPT_CHECK_GAP !== undefined ? Number(process.env.PROMPT_CHECK_GAP) : 45000;
 
 // Read the real chain rather than restating it. This constant used to hardcode
 // `llama-3.1-8b-instant` as its default, and when that model was decommissioned
@@ -210,7 +230,11 @@ const CASES = [
     messages: ['where is your location'],
     lang: 'en',
     minBullets: 2,
-    review: 'Even an address is a list. Lead-in, bullets, closing.',
+    // The address must be here; the Maps link must NOT. The widget appends it
+    // from a constant — see the LINK_ALLOWLIST note above.
+    must: [/Kohinoor One Plaza/i],
+    mustNot: [/maps\.app\.goo\.gl/i, /google maps/i],
+    review: 'Even an address is a list. Lead-in, bullets, closing. No maps URL.',
   },
   {
     name: 'Timings are structured',
@@ -320,12 +344,24 @@ const LIST_THRESHOLD = 4;
 // anything else, so a stray URL is not clickable — but it still reaches the
 // visitor as text, and a hallucinated address in a fee answer is a support
 // call. Checked on every reply.
+/*
+ * DELIBERATELY NOT the same list as LINK_ALLOWLIST in widget.js, and it must
+ * not be "fixed" to match.
+ *
+ * widget.js allowlists the Maps URL because the WIDGET emits it — the model is
+ * no longer told it exists, and the link is appended from a constant when the
+ * reply contains the office address. So a Maps URL appearing in raw model
+ * output is now a regression by definition: it means the prompt leaked the URL
+ * back in, or the model invented one. Leaving it out here is what catches that.
+ *
+ * This started as the model dropping a character from the short code
+ * (...VvnyZCYh6 for ...VvnyZCYcH6) and handing the visitor a dead string.
+ */
 const LINK_ALLOWLIST = [
   'https://4skills.app',
   'https://www.youtube.com/@4SKILLS256',
   'https://4skills.co/faq',
   'https://4skills.co/success-stories-ielts',
-  'https://maps.app.goo.gl/iGJmsU1VvnyZCYcH6',
 ];
 const URL_PATTERN = /https?:\/\/[^\s<>()[\]"']+/g;
 
@@ -488,9 +524,27 @@ for (const c of CASES) {
   for (const re of c.must || []) check(`contains ${re}`, re.test(reply));
   for (const re of c.mustNot || []) check(`does not contain ${re}`, !re.test(reply));
 
+  /*
+   * Courses whose fee the client has NOT confirmed.
+   *
+   * This used to assert "no fee figure at all". The client has since authorised
+   * a general RANGE for exactly these courses — roughly Rs 10,000–20,000 per
+   * month, or Rs 20,000–40,000 for two months — so a bare no-figure assertion
+   * now fails a reply that is doing precisely what it was told to do.
+   *
+   * What still must never appear is a SPECIFIC figure for one of these courses:
+   * the Oxford ELLT 26,000, the LanguageCert 28,000, the PTE AI 7,000. Those
+   * exist in the client's own documents but are listed as unconfirmed, and a
+   * half-stated add-on fee is a billing dispute at the counter. So the check is
+   * now an allowlist of the authorised range endpoints rather than a blanket
+   * prohibition.
+   */
   if (c.mustNotFee) {
-    const fees = reply.match(RS) || [];
-    check('states no fee figure', fees.length === 0, fees.join(', '));
+    const authorised = new Set(['10,000', '20,000', '40,000']);
+    const stray = (reply.match(RS) || []).filter(
+      (f) => !authorised.has(f.replace(/^Rs\.?\s?/i, '')),
+    );
+    check('states no fee figure outside the authorised range', stray.length === 0, stray.join(', '));
   }
   /*
    * "Sheffield University accepts PTE Academic." passed the old assertion,
