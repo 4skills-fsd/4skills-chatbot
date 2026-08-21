@@ -604,6 +604,40 @@ punctuation, then scored on term overlap against `question` + `keywords`, with
 `keywords` weighted 2×. Top 4 above a floor score are passed to the model; if nothing
 clears the floor, no FAQ context is sent and the system prompt's fallback rules handle it.
 
+### There is NO STEMMER, and that is not fixed — the plurals are a workaround
+
+`retrieve.js` tokenises and nothing more. `test` and `tests` are unrelated tokens, as are
+`price`/`prices`, `register`/`registering`, `certification`/`certifications`. A keyword
+listed in one form does not match the other, in either direction.
+
+**This is a known, unfixed gap in `retrieve.js`. The plural keywords in `knowledge.json`
+are a workaround, not a fix.** Adding both numbers to a keyword list papers over the
+symptom for the terms someone thought of; it does nothing for the next inflection a
+visitor types.
+
+How it shows up: retrieval returns NOTHING, and empty retrieval is where this model
+invents. `"where can I do practice tests"` matched no entry for months because the keyword
+was `practice test`, singular — while the `prompt-check` case for it passed the whole time,
+because the *prompt* tells the model to end practice answers with the 4skills.app link. A
+green suite and a silently empty retrieval, on the same query.
+
+A 52-probe diagnostic (Aug 2026) put the scale at roughly **a third of natural rephrasings
+failing**, split four ways: plain inflection (~6), derivational forms a light stripper
+would not join anyway — `certify`/`certified`/`certification` (~2), English synonyms the
+corpus simply lacks — `prices`, `begin`, `signing up` (~4), and Roman Urdu morphology,
+`parhane` vs `parhata`, `qiston` vs `qist` (~5). **A light `-s`/`-ing` suffix stripper
+would fix about a third of that and nothing in the Roman Urdu half**, which is the half
+that matters most for this audience.
+
+So before adding a stemmer, know what it buys. Until then:
+
+- **When you add a keyword, add both numbers.** `mock test` AND `mock tests`.
+- Run `npm run retrieval-check` after any keyword edit and diff the scores, not just the
+  pass count — additions are usually additive, but a generic term added at 2× weight can
+  quietly outrank a specific entry.
+- If a query returns nothing, that is the bug. Do not lower `SCORE_FLOOR` to hide it —
+  swept 0.15→0.25 once and every value traded one junk result for three lost ones.
+
 **Keywords must include Roman Urdu.** This is a Faisalabad audience and a meaningful
 share of enquiries arrive as `kitna`, `kitne`, `fees kya hai`, `kab shuru`,
 `admission kaise`, `kahan`. A pure-English keyword list silently misses them.

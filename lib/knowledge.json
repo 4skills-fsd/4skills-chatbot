@@ -17,7 +17,9 @@
       "fees kya hai",
       "fee kya hai",
       "paisay",
-      "package"
+      "package",
+      "charge",
+      "packages"
     ],
     "category": "fees"
   },
@@ -36,7 +38,9 @@
       "kitna",
       "kitne",
       "fees kya hai",
-      "package"
+      "package",
+      "charge",
+      "packages"
     ],
     "category": "fees"
   },
@@ -111,7 +115,8 @@
       "consultancy",
       "fee range",
       "approximate",
-      "andaza"
+      "andaza",
+      "short course"
     ],
     "category": "fees"
   },
@@ -133,7 +138,11 @@
       "qist",
       "aqsat",
       "included",
-      "all inclusive"
+      "all inclusive",
+      "charge",
+      "refunds",
+      "installments",
+      "instalments"
     ],
     "category": "fees"
   },
@@ -154,7 +163,8 @@
       "half",
       "partial",
       "discount",
-      "concession"
+      "concession",
+      "installments"
     ],
     "category": "fees"
   },
@@ -176,7 +186,8 @@
       "free trial",
       "computer delivered",
       "cd ielts",
-      "software"
+      "software",
+      "practice tests"
     ],
     "category": "portal"
   },
@@ -217,7 +228,8 @@
       "kitne baje",
       "class time",
       "batch timing",
-      "shift"
+      "shift",
+      "slots"
     ],
     "category": "logistics"
   },
@@ -314,7 +326,8 @@
       "process",
       "steps",
       "form",
-      "dakhla"
+      "dakhla",
+      "step"
     ],
     "category": "admissions"
   },
@@ -378,7 +391,10 @@
       "psi english",
       "study abroad",
       "consultant",
-      "consultancy"
+      "consultancy",
+      "program",
+      "programme",
+      "class"
     ],
     "category": "courses"
   },
@@ -394,7 +410,8 @@
       "kitne students",
       "strength",
       "crowded",
-      "individual attention"
+      "individual attention",
+      "student"
     ],
     "category": "courses"
   },
@@ -413,7 +430,9 @@
       "exam practice",
       "biweekly",
       "bi-weekly",
-      "weekly"
+      "weekly",
+      "mock tests",
+      "practice tests"
     ],
     "category": "courses"
   },
@@ -516,7 +535,8 @@
       "register test",
       "pearson",
       "slot booking",
-      "official test"
+      "official test",
+      "slots"
     ],
     "category": "admissions"
   },
@@ -726,7 +746,8 @@
       "pronunciation",
       "fluency",
       "machine",
-      "system"
+      "system",
+      "labs"
     ],
     "category": "teaching"
   },
@@ -770,7 +791,8 @@
       "malik",
       "kaun hai",
       "kis ka hai",
-      "banaya"
+      "banaya",
+      "teachers"
     ],
     "category": "about"
   },
@@ -797,7 +819,10 @@
       "trusted",
       "genuine",
       "asli",
-      "certified hai"
+      "certified hai",
+      "certifications",
+      "trainers",
+      "teachers"
     ],
     "category": "about"
   }
