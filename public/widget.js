@@ -1232,14 +1232,26 @@
      *
      * Also saves one request per lead against the token budget.
      */
-    if (acceptsOffer(text)) {
-      addMessage(text, 'user');
+    addMessage(text, 'user');
+
+    /*
+     * The interception only counts if the form ACTUALLY REACHED the visitor.
+     *
+     * showLeadForm() returns false when a card is already open, or when the
+     * lead was already captured. The first version of this took the early
+     * return regardless, so an affirmative typed while a form was open was
+     * intercepted, produced no form, made no request, and rendered nothing at
+     * all. The visitor typed "ok", then "yes", and the bot answered neither.
+     *
+     * AN AFFIRMATIVE MUST NEVER PRODUCE SILENCE. If the form cannot be shown,
+     * the turn falls through and goes to the model like any other message.
+     * Swallowing a turn is worse than a redundant reply.
+     */
+    if (acceptsOffer(text) && showLeadForm()) {
       history.push({ role: 'user', content: text });
       persist();
-      if (showLeadForm()) {
-        flags.leadAsked = true;
-        writeStore(KEY_FLAGS, flags);
-      }
+      flags.leadAsked = true;
+      writeStore(KEY_FLAGS, flags);
       if (window.console && window.console.log) {
         window.console.log(
           '[4Skills] lead form opened locally (offer + affirmative) — no /api/chat call'
@@ -1248,7 +1260,6 @@
       return;
     }
 
-    addMessage(text, 'user');
     // NOT pushed to history yet — see pendingUser. Committed in receive() on a
     // 2xx, dropped on every failure path.
     pendingUser = { role: 'user', content: text };

@@ -94,9 +94,15 @@ function makeWidget() {
   function send(text, response) {
     state.rendered.push({ who: 'user', text });
 
-    if (w.acceptsOffer(text)) {
+    // submit(): the interception counts only if the form actually rendered.
+    // showLeadForm() returns false when a card is already open or the lead was
+    // already captured — and then the turn MUST fall through to the model.
+    const formWouldShow = !state.leadCardOpen && !state.flags.leadCaptured;
+    if (w.acceptsOffer(text) && formWouldShow) {
       w.push({ role: 'user', content: text });
       state.formOpens++;
+      state.leadCardOpen = true;
+      state.flags.leadAsked = true;
       return { calledApi: false };
     }
 
@@ -359,12 +365,37 @@ console.log('\nserver offer detection covers what the model actually writes');
   const reOf = (name) => {
     const m = src.match(new RegExp('const ' + name + ' =\\s*new RegExp\\(\\s*\\[([\\s\\S]*?)\\]\\.join'));
     if (m) return new RegExp([...m[1].matchAll(/\/(.+?)\/\.source/g)].map((x) => x[1]).join('|'), 'i');
-    const lit = src.match(new RegExp('const ' + name + ' =\\s*\\n?\\s*\\/(.+?)\\/i;'));
-    return new RegExp(lit[1], 'i');
+    const lit = src.match(new RegExp('const ' + name + ' =\\s*\\n\\s{2}(\\/[\\s\\S]*?\\/)i;'));
+    if (!lit) throw new Error('could not extract ' + name + ' from api/chat.js');
+    return new RegExp(lit[1].slice(1, -1), 'i');
   };
   const CALL_OFFER = reOf('CALL_OFFER');
-  const OFFER_INVITE = reOf('OFFER_INVITE');
+  const OFFER_FRAME = reOf('OFFER_FRAME');
+  const OFFER_TOPIC = reOf('OFFER_TOPIC');
+  // Composed exactly as api/chat.js composes OFFER_INVITE: an explicit call
+  // offer, OR a personal offer frame with a lead-shaped topic in the same
+  // sentence. Built from the same two sources so it cannot drift.
+  const OFFER_INVITE = new RegExp(
+    OFFER_FRAME.source + '[^.?!\\n]{0,40}' + OFFER_TOPIC.source, 'i',
+  );
   const isOffer = (s) => CALL_OFFER.test(s) || OFFER_INVITE.test(s);
+
+  /*
+   * The greeting armed the flag and a visitor's "ok" opened a form on turn one.
+   * "I can help with course fees, class timings, and how to enrol" carries the
+   * topic words but offers the visitor nothing — it describes capability.
+   */
+  for (const s of [
+    'Hello, welcome to 4Skills. I can help with course fees, class timings, and how to enrol. What would you like to know?',
+    'I can help with fees, timings and enrolment.',
+    'Enrolment takes three steps: the form, the fee, and the evaluation test.',
+  ]) check('capability text is NOT an offer: ' + s.slice(0, 40), !isOffer(s), 'expected false');
+
+  for (const s of [
+    'Would you like someone to call you?',
+    'Shall I check the next batch for you?',
+    'Would you like me to arrange a callback?',
+  ]) check('personal offer IS an offer: ' + s.slice(0, 44), isOffer(s), 'expected true');
 
   // Observed live, and the exact line that broke it.
   for (const s of [
@@ -420,6 +451,54 @@ console.log('\nan English bulleted, bolded reply survives intact');
     replayed && (replayed.content.match(/^- /gm) || []).length === 2);
   check('nothing truncated the reply on the way out',
     replayed && replayed.content === SHAPED);
+}
+
+// --- 10. an affirmative must never produce silence -------------------------
+//
+// Live bug: the affirmative was intercepted, the form was suppressed because a
+// card was already open, and the early return fired anyway — no form, no
+// request, nothing rendered. The visitor typed "ok", then "yes", and the bot
+// answered neither.
+
+console.log('\nan affirmative never produces silence');
+{
+  const { state, send } = makeWidget();
+  send('ielts academic', ok200('Rs 35,000. Shall I have someone call you today?', true));
+
+  const first = send('ok', null);
+  check('first affirmative opens the form', first.calledApi === false && state.formOpens === 1);
+
+  // Card still open. The next affirmative cannot open a second one.
+  const second = send('yes', ok200('The team will call you shortly.'));
+  check('second affirmative is NOT swallowed', second.calledApi === true,
+    'must reach /api/chat when the form cannot be shown');
+  check('and it produced a visible reply',
+    state.rendered.some((m) => m.who === 'bot' && /call you shortly/.test(m.text)));
+  check('no second form was opened', state.formOpens === 1);
+}
+
+{
+  // Same, via the leadCaptured gate rather than an open card.
+  const { state, send } = makeWidget();
+  send('ielts academic', ok200('Rs 35,000. Shall I have someone call you today?', true));
+  state.flags.leadCaptured = true;
+  const r = send('yes', ok200('Someone will be in touch shortly.'));
+  check('affirmative after leadCaptured reaches the model', r.calledApi === true);
+  check('and renders a reply',
+    state.rendered.some((m) => m.who === 'bot' && /in touch/.test(m.text)));
+  check('no form for a captured lead', state.formOpens === 0);
+}
+
+// --- 11. the happy path still works on the first ask -----------------------
+
+console.log('\nthe first ask still opens the form with zero API calls');
+for (const word of ['yes', 'ok', 'sure', 'haan']) {
+  const { state, send } = makeWidget();
+  send('ielts academic', ok200('Rs 35,000. Shall I have someone call you today?', true));
+  const before = state.calls.length;
+  const r = send(word, null);
+  check(`"${word}" opens the form on the first ask`,
+    r.calledApi === false && state.formOpens === 1 && state.calls.length === before);
 }
 
 console.log('');

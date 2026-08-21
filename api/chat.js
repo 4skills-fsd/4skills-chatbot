@@ -142,9 +142,49 @@ const CALL_OFFER = new RegExp(
  * Deliberately NOT matched, because "yes" to them is not lead intent:
  *   "Which one do you need?"
  *   "Would you like information on any of our courses?"
+ *
+ * NARROWED after it armed on the greeting:
+ *
+ *   "Hello, welcome to 4Skills. I can help with course fees, class timings,
+ *    and how to enrol. What would you like to know?"
+ *
+ * The topic words were there ("how to enrol"), so the old topic-only pattern
+ * armed — and then a visitor's "ok" opened a lead form on the opening turn. A
+ * sentence describing what the bot CAN HELP WITH is not an offer.
+ *
+ * So a topic is no longer sufficient. There must also be a frame in which the
+ * assistant offers to do something FOR THIS VISITOR: "shall I…", "would you
+ * like me/someone to…", "can I check…". "I can help with X" has no such frame
+ * and never will. Note the frame list deliberately spells out the verbs after
+ * "I can" — arrange, check, book — because "I can help" is exactly the phrase
+ * that caused this.
  */
-const OFFER_INVITE =
-  /\b(?:start\s?dates?|starting\s?dates?|next\s?batch|batch\s(?:details|timings?|starts?)|how\s+to\s+enroll?|enroll?ment\s+(?:steps|process)|admission\s+(?:steps|process)|seat\s+(?:for|in)|book\s+a\s+seat)\b/i;
+const OFFER_FRAME =
+  /\b(?:shall\s+i|should\s+i|would\s+you\s+like|do\s+you\s+want|can\s+i|may\s+i|i\s+can\s+(?:arrange|have|check|book|get|set\s?up|organis[ez])|let\s+me\s+(?:check|arrange|book))\b/i;
+
+const OFFER_TOPIC =
+  /\b(?:call|callback|call\s?back|start\s?dates?|starting\s?dates?|next\s?batch|batch|enroll?|enroll?ment|admission|seat|appointment|visit)\b/i;
+
+/*
+ * The frame and the topic must be in the SAME sentence, close together.
+ *
+ * Requiring both merely to appear somewhere in the reply was not enough — the
+ * greeting still armed, because it supplies the frame and the topic in two
+ * different sentences:
+ *
+ *   "I can help with course fees, class timings, and how to enrol.
+ *    What would you like to know?"
+ *              ^^^^^^^^^^^^^^ frame            ^^^^^ topic, previous sentence
+ *
+ * `[^.?!\n]{0,40}` cannot cross a sentence boundary or a line break, so the
+ * generic closing question no longer borrows a topic from the sentence before
+ * it. "Would you like to know about available start dates?" still arms, because
+ * there the topic really is what is being offered.
+ */
+const OFFER_INVITE = new RegExp(
+  OFFER_FRAME.source + '[^.?!\\n]{0,40}' + OFFER_TOPIC.source,
+  'i',
+);
 
 // Backstop for when the model forgets the marker entirely.
 const ENROL_INTENT =
@@ -397,7 +437,18 @@ export default async function handler(req, res) {
      * and a flag that lies about what the message said would be worse than
      * useless when someone is debugging the next transcript.
      */
-    const offer = CALL_OFFER.test(reply) || OFFER_INVITE.test(reply);
+    /*
+     * Never on the first assistant turn of a session.
+     *
+     * The opening reply is an orientation message — it says what the bot can
+     * help with, which is topic-shaped by nature. Nothing has been discussed
+     * yet, so there is nothing an affirmative could be accepting, and a form on
+     * turn one is the intrusion the whole design avoids.
+     */
+    const firstAssistantTurn = messages.filter((m) => m.role === 'assistant').length === 0;
+
+    const offer =
+      !firstAssistantTurn && (CALL_OFFER.test(reply) || OFFER_INVITE.test(reply));
 
     const usage = result.usage || {};
     return sendJson(
