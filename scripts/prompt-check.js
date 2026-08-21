@@ -323,6 +323,33 @@ const CASES = [
     must: [/https:\/\/4skills\.app/, /28,000/],
     review: 'Course answers end with the practice-tests link.',
   },
+  /*
+   * A single named course is still a list.
+   *
+   * Live, "ielts academic" came back as flat prose — no bullets, no bold, no
+   * practice link. It went unnoticed because the only case covering a named
+   * course asserted the LINK and the fee figure and nothing about shape, so a
+   * paragraph carrying the right number passed. The two cases below assert the
+   * shape as well, on both an English name and a "tell me about X" phrasing.
+   */
+  {
+    name: 'Single named course is structured — ielts academic',
+    messages: ['ielts academic'],
+    lang: 'en',
+    minBullets: 2,
+    minBold: 1,
+    must: [/https:\/\/4skills\.app/, /35,000/],
+    review: 'Fee and course name bolded, inclusions bulleted, practice link, closing question.',
+  },
+  {
+    name: 'Single named course is structured — tell me about spoken english',
+    messages: ['tell me about spoken english'],
+    lang: 'en',
+    minBullets: 2,
+    minBold: 1,
+    must: [/https:\/\/4skills\.app/, /26,000/],
+    review: 'Same shape for a non-test course.',
+  },
   {
     name: 'Practice-test question surfaces 4skills.app',
     messages: ['where can I do practice tests'],
@@ -661,7 +688,19 @@ for (const c of CASES) {
    * prohibition.
    */
   if (c.mustNotFee) {
-    const authorised = new Set(['10,000', '20,000', '40,000']);
+    /*
+     * Rs 25,000–35,000 added as a third authorised range, alongside the
+     * per-month (10,000–20,000) and two-month (20,000–40,000) ones.
+     *
+     * NOTE 35,000 IS ALSO THE CONFIRMED IELTS ACADEMIC FEE. Allowing it here
+     * means this assertion can no longer catch the bot quoting the IELTS fee
+     * for a web-development course, which is one of the mis-attributions it
+     * existed to catch. That is a real loss of coverage, accepted deliberately;
+     * it is not an oversight. The figures it still rejects are the ones with
+     * actual exposure — Oxford ELLT 26,000, LanguageCert 28,000, PTE AI 7,000,
+     * all present in the client's documents and all marked unconfirmed.
+     */
+    const authorised = new Set(['10,000', '20,000', '25,000', '35,000', '40,000']);
     const stray = (reply.match(RS) || []).filter(
       (f) => !authorised.has(f.replace(/^Rs\.?\s?/i, '')),
     );
