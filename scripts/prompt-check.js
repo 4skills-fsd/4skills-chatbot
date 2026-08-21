@@ -66,6 +66,25 @@ const REQUEST_GAP_MS =
 const PRIMARY_MODEL = models()[0];
 
 const RS = /\bRs\.?\s?\d{1,3}(,\d{3})+|\b\d{2},000\b/g;
+
+/*
+ * The only rupee figures that may appear in any reply.
+ *
+ * CONFIRMED_FEES is the five confirmed course fees — 35,000 twice (IELTS
+ * Academic, IELTS General Training), 28,000 (PTE Academic), 26,000 twice
+ * (Spoken English, IELTS Life Skills A1) — so three distinct values.
+ *
+ * RANGE_ENDPOINTS is the client-authorised guide range for courses whose fee
+ * is not confirmed: roughly Rs 10,000–20,000 per month, or Rs 20,000–40,000
+ * for a two-month course.
+ *
+ * The third authorised range, Rs 25,000–35,000, is NOT here on purpose. It
+ * applies only where an unconfirmed course is in scope, so it lives on those
+ * cases — see mustNotFee. Keeping the global set tight is what still catches a
+ * confirmed fee being attached to the wrong course.
+ */
+const CONFIRMED_FEES = new Set(['35,000', '28,000', '26,000']);
+const RANGE_ENDPOINTS = new Set(['10,000', '20,000', '40,000']);
 const CLOCK = /\b\d{1,2}[:.]\d{2}\s?(am|pm)?\b/gi;
 const ALLOWED_CLOCK = new Set(['9:00', '8:00', '11:00', '4:00', '09:00', '04:00']);
 
@@ -665,6 +684,35 @@ for (const c of CASES) {
   const bandHit = reply.match(BAND_RANGE) || reply.match(BAND_SINGLE);
   check('states no band figure or range', !bandHit, bandHit ? bandHit[0] : '');
 
+  /*
+   * Global, every case: every rupee figure must be one we actually have.
+   *
+   * The only numbers that may appear anywhere are the five confirmed course
+   * fees and the endpoints of the two authorised guide ranges. Anything else
+   * is invented, or is one of the client's own UNCONFIRMED figures leaking in —
+   * Oxford ELLT 26,000 is indistinguishable from the confirmed Spoken English
+   * 26,000 at this level, but LanguageCert 28,000, the PTE AI 7,000 and the
+   * portal charges are all caught here wherever they appear.
+   *
+   * This is deliberately NOT where the 25,000–35,000 guide range lives. That
+   * tolerance belongs only to cases about unconfirmed courses (see mustNotFee),
+   * because a global 25,000 allowance would let an invented figure through on
+   * a confirmed-fee answer, and a global check that tolerates everything the
+   * loosest case tolerates is no longer a global check.
+   */
+  //
+  // Skipped where mustNotFee applies: that case runs its own, differently
+  // scoped allowlist below and SUPERSEDES this one. Running both would fail a
+  // correct "Rs 25,000 to 35,000" answer on the global set while the case-level
+  // set passed it — two checks disagreeing about the same reply.
+  if (!c.mustNotFee) {
+    const feeHits = (reply.match(RS) || []).map((f) => f.replace(/^Rs\.?\s?/i, ''));
+    const unauthorised = feeHits.filter(
+      (f) => !CONFIRMED_FEES.has(f) && !RANGE_ENDPOINTS.has(f),
+    );
+    check('states no unauthorised fee figure', unauthorised.length === 0, unauthorised.join(', '));
+  }
+
   // Global, every case: no URL outside the allowlist.
   const strayUrls = offAllowlistUrls(reply);
   check('shares no URL outside the allowlist', strayUrls.length === 0, strayUrls.join(', '));
@@ -687,20 +735,25 @@ for (const c of CASES) {
    * now an allowlist of the authorised range endpoints rather than a blanket
    * prohibition.
    */
+  /*
+   * Cases where an UNCONFIRMED course is what is being asked about.
+   *
+   * These are the only replies allowed to quote the Rs 25,000–35,000 guide
+   * range, on top of the per-month and two-month ranges. Deliberately STRICTER
+   * than the global check in one direction and looser in another:
+   *
+   *   looser  — 25,000 is permitted here and nowhere else
+   *   tighter — the confirmed fees 28,000 and 26,000 are NOT permitted, because
+   *             quoting the PTE or Spoken English fee for a web-development
+   *             course is exactly the mis-attribution this case exists to catch
+   *
+   * 35,000 remains permitted as the top of the authorised range, which does
+   * mean an IELTS fee attached to an unconfirmed course passes HERE. That gap
+   * is the price of the range as authorised; the global check above is what
+   * keeps it from widening any further.
+   */
   if (c.mustNotFee) {
-    /*
-     * Rs 25,000–35,000 added as a third authorised range, alongside the
-     * per-month (10,000–20,000) and two-month (20,000–40,000) ones.
-     *
-     * NOTE 35,000 IS ALSO THE CONFIRMED IELTS ACADEMIC FEE. Allowing it here
-     * means this assertion can no longer catch the bot quoting the IELTS fee
-     * for a web-development course, which is one of the mis-attributions it
-     * existed to catch. That is a real loss of coverage, accepted deliberately;
-     * it is not an oversight. The figures it still rejects are the ones with
-     * actual exposure — Oxford ELLT 26,000, LanguageCert 28,000, PTE AI 7,000,
-     * all present in the client's documents and all marked unconfirmed.
-     */
-    const authorised = new Set(['10,000', '20,000', '25,000', '35,000', '40,000']);
+    const authorised = new Set([...RANGE_ENDPOINTS, '25,000', '35,000']);
     const stray = (reply.match(RS) || []).filter(
       (f) => !authorised.has(f.replace(/^Rs\.?\s?/i, '')),
     );
