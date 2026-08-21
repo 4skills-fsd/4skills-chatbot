@@ -194,7 +194,7 @@ console.log('\nall three models fail — failed turn never reaches the next payl
 // --- 3. offer -> short affirmative opens the form with no model call --------
 
 console.log('\noffer + short affirmative opens the form locally');
-for (const word of ['yes', 'Yes!', 'haan', 'ji haan', 'ok', 'theek hai', 'yes please', 'CALL ME']) {
+for (const word of ['yes', 'Yes!', 'sure', 'Sure.', 'haan', 'ji haan', 'ok', 'theek hai', 'yes please', 'CALL ME']) {
   const { state, send } = makeWidget();
   send('ielts academic', ok200('Rs 35,000. Shall I have someone call you today?', true));
   const before = state.calls.length;
@@ -342,6 +342,84 @@ console.log('\noutage lead payload has the same shape as the normal one');
     b.transcript.some((m) => /ielts academic/i.test(m.content)));
   check('no /api/chat call is needed to submit either',
     typeof a.transcript.length === 'number' && typeof b.transcript.length === 'number');
+}
+
+// --- 8. what counts as an offer -------------------------------------------
+//
+// The reported bug. CALL_OFFER only matched explicit call phrasings, but live
+// the model rarely offers a call — it ends on an enrolment or batch invitation.
+// A visitor saying "yes" to "would you like to know about start dates or how to
+// enrol?" has expressed exactly the intent the form exists to capture, and
+// `offer` came back false, so the widget did not intercept and the turn went to
+// the model. Reproduced against dev before the fix.
+
+console.log('\nserver offer detection covers what the model actually writes');
+{
+  const src = readFileSync(new URL('../api/chat.js', import.meta.url), 'utf8');
+  const reOf = (name) => {
+    const m = src.match(new RegExp('const ' + name + ' =\\s*new RegExp\\(\\s*\\[([\\s\\S]*?)\\]\\.join'));
+    if (m) return new RegExp([...m[1].matchAll(/\/(.+?)\/\.source/g)].map((x) => x[1]).join('|'), 'i');
+    const lit = src.match(new RegExp('const ' + name + ' =\\s*\\n?\\s*\\/(.+?)\\/i;'));
+    return new RegExp(lit[1], 'i');
+  };
+  const CALL_OFFER = reOf('CALL_OFFER');
+  const OFFER_INVITE = reOf('OFFER_INVITE');
+  const isOffer = (s) => CALL_OFFER.test(s) || OFFER_INVITE.test(s);
+
+  // Observed live, and the exact line that broke it.
+  for (const s of [
+    'Would you like to know about available start dates or how to enrol?',
+    'Shall I check the next batch for you?',
+    'I can arrange for someone from our team to call you.',
+    'Would you like me to arrange a callback?',
+    'Share your name and number and the team will call you.',
+  ]) check('offer: ' + s.slice(0, 52), isOffer(s), 'expected true');
+
+  // "yes" to these is NOT lead intent — they must stay false or every reply
+  // becomes an offer and the form opens on the first affirmative.
+  for (const s of [
+    'Which one do you need?',
+    'Would you like information on any of our courses?',
+    'IELTS Academic is Rs 35,000 for the full 8-week course.',
+    'Classes run Monday to Friday, 9:00 AM to 8:00 PM.',
+    'Our office is at Kohinoor One Plaza, Jaranwala Road.',
+  ]) check('not an offer: ' + s.slice(0, 46), !isOffer(s), 'expected false');
+}
+
+// --- 9. English bullets and bold survive the pipeline intact ----------------
+//
+// The other reported regression: English answers came back as flat prose. The
+// prompt is what produces the shape, but nothing between the model and the
+// screen may damage it — a reply that arrives bulleted must stay bulleted in
+// history and in the next payload, uncut.
+
+console.log('\nan English bulleted, bolded reply survives intact');
+{
+  const SHAPED =
+    'We offer two IELTS courses:\n\n' +
+    '- **IELTS Academic** — Rs 35,000\n' +
+    '- **IELTS General Training** — Rs 35,000\n\n' +
+    'Both run 8 weeks with bi-weekly mock tests. Free practice tests at https://4skills.app\n\n' +
+    'Which one do you need?';
+
+  const { state, send } = makeWidget();
+  send('i need info about ielts', ok200(SHAPED));
+
+  const stored = state.history.find((m) => m.role === 'assistant');
+  const bullets = (stored.content.match(/^- /gm) || []).length;
+  const bolds = (stored.content.match(/\*\*[^*]+\*\*/g) || []).length;
+
+  check('two bullet lines are stored', bullets === 2, bullets + ' found');
+  check('bold markers are stored', bolds >= 2, bolds + ' found');
+  check('stored reply is byte-identical to the model output', stored.content === SHAPED);
+
+  send('and PTE?', ok200('**PTE Academic** is **Rs 28,000**.'));
+  const payload = state.calls[state.calls.length - 1];
+  const replayed = payload.find((m) => m.role === 'assistant' && /IELTS Academic/.test(m.content));
+  check('bullets survive into the next payload',
+    replayed && (replayed.content.match(/^- /gm) || []).length === 2);
+  check('nothing truncated the reply on the way out',
+    replayed && replayed.content === SHAPED);
 }
 
 console.log('');

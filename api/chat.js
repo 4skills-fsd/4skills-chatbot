@@ -126,6 +126,26 @@ const CALL_OFFER = new RegExp(
   'i',
 );
 
+/*
+ * The other half of an offer: an INVITATION whose acceptance is lead intent.
+ *
+ * CALL_OFFER above only matches explicit call phrasings, and that turned out to
+ * be too narrow. Live, the model rarely offers a call — it ends on things like
+ *
+ *   "Would you like to know about available start dates or how to enrol?"
+ *   "Shall I check the next batch for you?"
+ *
+ * A visitor answering "yes" to either has told you exactly what the lead form
+ * exists to capture, but `offer` stayed false, so the widget did not intercept
+ * and the turn went to the model instead. That is the reported bug.
+ *
+ * Deliberately NOT matched, because "yes" to them is not lead intent:
+ *   "Which one do you need?"
+ *   "Would you like information on any of our courses?"
+ */
+const OFFER_INVITE =
+  /\b(?:start\s?dates?|starting\s?dates?|next\s?batch|batch\s(?:details|timings?|starts?)|how\s+to\s+enroll?|enroll?ment\s+(?:steps|process)|admission\s+(?:steps|process)|seat\s+(?:for|in)|book\s+a\s+seat)\b/i;
+
 // Backstop for when the model forgets the marker entirely.
 const ENROL_INTENT =
   /\b(enrol|enroll|enrolment|enrollment|admission|admissions|daakhla|dakhla|join|register|registration|sign\s?up|apply|start|starting|shuru|call me|callback|call back|contact|visit|seat|book)\b|kab shuru|admission kaise|kaise/i;
@@ -377,7 +397,7 @@ export default async function handler(req, res) {
      * and a flag that lies about what the message said would be worse than
      * useless when someone is debugging the next transcript.
      */
-    const offer = CALL_OFFER.test(reply);
+    const offer = CALL_OFFER.test(reply) || OFFER_INVITE.test(reply);
 
     const usage = result.usage || {};
     return sendJson(
