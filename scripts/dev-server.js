@@ -19,6 +19,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, normalize } from 'node:path';
 import { readWidget, hashOf, gzippedBytes, SIZE_LIMIT_GZIP } from '../lib/build.js';
+import { reportOrigins } from '../lib/guard.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 3000;
@@ -137,7 +138,11 @@ server.listen(PORT, () => {
   console.log(`  static    public/   (widget.js is no-store)`);
   console.log(`  models    ${process.env.GROQ_MODELS || '(default chain)'}`);
   console.log(`  groq      ${process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1'}`);
-  console.log(`  key       ${process.env.GROQ_API_KEY ? 'set' : 'MISSING'}`);
+  console.log(`  key       ${process.env.GROQ_API_KEY ? 'set (developer key — the client key lives only in Vercel)' : 'MISSING'}`);
+  console.log('');
+  // Prints the resolved allowlist and shouts about malformed entries. A missing
+  // comma here is an invisible 403 on one domain — see validateOrigins().
+  reportOrigins();
   console.log('');
   console.log(`  The browser console should print build ${build}. If it prints`);
   console.log('  anything else, it is running a cached widget — hard-refresh.');

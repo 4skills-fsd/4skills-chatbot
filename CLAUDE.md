@@ -126,11 +126,29 @@ against Groq's own `usage.prompt_tokens` — close enough to answer "which part 
 is the only question it is for. History is the only part that grows, which is why the
 widget sends a 4-message window.
 
-**`prompt-check` runs and live traffic compete for the same quota.** One suite run is
-~36 requests. On the client's key that is a material fraction of the day and it has already
-taken the live widget down once — three suite runs in one day exhausted TPD on two models,
-and the client's first real conversation hit the wall. **Use a separate development key, or
-do not run the suite on a day the client is using the widget.**
+### Which Groq key is which — check this before blaming quota
+
+**There are two keys, and they never meet.**
+
+| Key | Lives in | Whose quota |
+|---|---|---|
+| Developer key | `.env.local`, git-ignored, never deployed | The developer's (Ahmad's) |
+| Client key | The client's Vercel environment variables only | The client's |
+
+The client's key is **never present locally**. Nothing you run from this repo — `npm run dev`,
+`prompt-check`, a `curl` against `api.groq.com` — can touch the client's daily budget, and
+nothing the client's visitors do eats into yours. Local TPD exhaustion and a production
+outage are independent events that look identical in the error body.
+
+**So an org id in a 429 identifies which key hit the wall, not which environment matters.**
+A previous session read a local 429 (`org_01kc3…`), assumed it was the client's key, and
+concluded that its own `prompt-check` runs had taken the live widget down. That was wrong:
+the org was the developer's. Do not repeat the inference. If production is failing, the
+evidence is in Vercel's logs, not in anything reproducible here.
+
+`prompt-check` is ~36 requests, roughly 100,000 tokens at the post-cut size — **half of one
+model's daily budget on the DEVELOPER key.** Budget accordingly, but it is not a production
+risk.
 
 ### The fallback chain is correct — do not "fix" it
 
