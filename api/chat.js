@@ -190,6 +190,32 @@ const OFFER_INVITE = new RegExp(
 const ENROL_INTENT =
   /\b(enrol|enroll|enrolment|enrollment|admission|admissions|daakhla|dakhla|join|register|registration|sign\s?up|apply|start|starting|shuru|call me|callback|call back|contact|visit|seat|book)\b|kab shuru|admission kaise|kaise/i;
 
+/*
+ * One line per failed attempt, with the reason.
+ *
+ * This used to run only when the WHOLE chain failed. When the chain succeeded
+ * on a fallback — by far the more common case — the log got a compact
+ * "served by X after 1 failed attempt(s): openai/gpt-oss-20b=429" and nothing
+ * else. That drops the only diagnostic that matters: TPD and TPM both surface
+ * as 429, they mean completely different things, and the distinction lives in
+ * the message body, not the status.
+ *
+ * It cost a full suite run to notice. 36 of 36 requests fell through to the
+ * fallback and the logs could not say which ceiling had been hit, so the run
+ * was unattributable. Log the reason wherever a model refuses.
+ */
+function logAttempt(a, log = console.error) {
+  if (!a || (a.status >= 200 && a.status < 300 && !a.error)) return;
+  log(
+    `[chat] chain ${a.model || '(no key)'} -> ${a.status || 'network'}` +
+      (a.code ? ` code=${a.code}` : '') +
+      (a.rateHeaders && Object.keys(a.rateHeaders).length
+        ? ' ' + JSON.stringify(a.rateHeaders)
+        : '') +
+      (a.message || a.error ? ` :: ${(a.message || a.error).slice(0, 220)}` : ''),
+  );
+}
+
 function stripMarker(text) {
   return text
     .replace(LEAD_MARKER, '')
@@ -363,16 +389,7 @@ export default async function handler(req, res) {
        *
        * Note TPD appears only in `message`, never in the headers. See groq.js.
        */
-      for (const a of result.attempts) {
-        console.error(
-          `[chat] chain ${a.model || '(no key)'} -> ${a.status || 'network'}` +
-            (a.code ? ` code=${a.code}` : '') +
-            (a.rateHeaders && Object.keys(a.rateHeaders).length
-              ? ' ' + JSON.stringify(a.rateHeaders)
-              : '') +
-            (a.message || a.error ? ` :: ${(a.message || a.error).slice(0, 200)}` : ''),
-        );
-      }
+      for (const a of result.attempts) logAttempt(a, console.error);
       const errorKind = classify(result.attempts);
       console.error(`[chat] all models failed errorKind=${errorKind}`);
 
@@ -393,16 +410,15 @@ export default async function handler(req, res) {
       );
     }
 
-    // Which model actually served it, and whether the chain had to move.
+    // Which model actually served it, and — crucially — WHY the chain moved.
+    // The reason goes in even though this path succeeded: a fallback that keeps
+    // working is exactly the situation nobody investigates until a suite run
+    // turns out to have measured the wrong model.
     if (result.attempts.length > 1) {
       console.log(
-        `[chat] served by ${result.model} after ${result.attempts.length - 1} ` +
-          `failed attempt(s): ` +
-          result.attempts
-            .slice(0, -1)
-            .map((a) => `${a.model}=${a.status || 'network'}${a.code ? '/' + a.code : ''}`)
-            .join(' '),
+        `[chat] served by ${result.model} after ${result.attempts.length - 1} failed attempt(s)`,
       );
+      for (const a of result.attempts.slice(0, -1)) logAttempt(a, console.warn);
     }
 
     const markerSeen = LEAD_MARKER.test(result.reply);

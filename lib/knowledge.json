@@ -24,7 +24,7 @@
   {
     "id": "pte-fee",
     "question": "How much does the PTE Academic course cost?",
-    "answer": "PTE Academic is Rs 28,000 for the full 8-week course. PTE students also subscribe to a computer-delivered practice portal, which is charged separately by package.",
+    "answer": "PTE Academic is Rs 28,000 for the full 8-week course.",
     "keywords": [
       "pte",
       "pte academic",
@@ -118,7 +118,7 @@
   {
     "id": "hidden-charges",
     "question": "Are there any hidden or additional charges?",
-    "answer": "The course fee is all-inclusive. It covers classroom instruction, sample study material, access to 4skills.co for replaying listening audio, and full-length bi-weekly mock tests with results. There are no additional administrative fees. The computer-delivered practice portal is a separate optional subscription. Fee is not refundable.",
+    "answer": "The course fee is all-inclusive. It covers classroom instruction, sample study material, access to 4skills.co for replaying listening audio, and full-length bi-weekly mock tests with results. There are no additional administrative fees. Fee is not refundable.",
     "keywords": [
       "hidden",
       "extra",
@@ -161,7 +161,7 @@
   {
     "id": "practice-portal-subscription",
     "question": "What does the 4skills.app practice portal cost?",
-    "answer": "4skills.app is our computer-delivered practice and mock-test portal. Subscription packages are listed on 4skills.app itself, and there is a free trial for a limited set of IELTS computer-delivered tests. You can subscribe to the portal without enrolling in a class, though we recommend coaching first.",
+    "answer": "4skills.app is our computer-delivered practice and mock-test portal, with a free trial covering a set of IELTS computer-delivered tests. For anything about paid access, the office confirms the details — share your name and number, or WhatsApp 0332 241 0155.",
     "keywords": [
       "portal",
       "app",
@@ -296,7 +296,7 @@
   {
     "id": "enrolment-process",
     "question": "How do I enrol?",
-    "answer": "Three steps. First, fill in the admission form for your course. Second, pay the fee for your package and subscribe to your portal package. Third, take the evaluation test, which usually takes two to three hours. After that you are invited to join your class.",
+    "answer": "Three steps. First, fill in the admission form for your course. Second, pay the course fee. Third, take the evaluation test, which usually takes two to three hours. After that you are invited to join your class.",
     "keywords": [
       "enrol",
       "enroll",
@@ -714,7 +714,7 @@
   {
     "id": "pte-lab-ai-tools",
     "question": "Do you have computer labs and AI practice tools for PTE?",
-    "answer": "Yes. PTE classes are structured around a dedicated software portal. Students subscribe to it and get AI-driven practice with real-time automated scoring for oral fluency, pronunciation and written discourse.",
+    "answer": "Yes. PTE classes are structured around a dedicated software portal, giving AI-driven practice with real-time automated scoring for oral fluency, pronunciation and written discourse.",
     "keywords": [
       "lab",
       "computer lab",

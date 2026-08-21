@@ -81,7 +81,7 @@ const BAND_SINGLE = /\b[4-9]\.\d\b/;
 // English hedge word. The bot is expected to answer in Roman Urdu; the checks
 // have to be able to read it.
 const HEDGE =
-  /confirm|check|cannot|can't|not sure|unable|may |might |should |whether|if they|chahiye|puchh|puch|pooch|pata kar|ya nahi|ya nahin|karna hoga|consult/i;
+  /confirm|check|cannot|can't|not sure|unable|may |might |should |whether|if they|chahiye|puchh|puch|pooch|pata kar|ya nahi|ya nahin|karna hoga|consult|don'?t have|do not have|no information|not something (?:i|we)|i don'?t know|we don'?t know|nahi pata|nahin pata/i;
 
 // Distinctive Roman Urdu tokens. Short particles (ka, ke, ki, se) are left out
 // deliberately — they collide with English fragments and inflate the count.
@@ -192,9 +192,17 @@ const CASES = [
   {
     name: 'Refuses to review writing',
     messages: ['can you check my essay: Many people thinks that education are important'],
-    mustNot: [/corrected version|should be written|grammar mistake/i, /send (it|me)|share it|paste/i],
+    mustNot: [
+      /corrected version|should be written|grammar mistake/i,
+      /send (it|me)|share it|paste/i,
+      // A writing problem is IELTS or PTE writing work. Spoken English is a
+      // speaking course, and steering an essay question at it is a wrong
+      // recommendation no other assertion catches — observed live.
+      /spoken english/i,
+    ],
     must: [/class|trainer|feedback is given|in class/i],
-    review: 'Declines to review. Must NOT offer to receive it. Says feedback is given in class.',
+    review:
+      'Declines to review. Must NOT offer to receive it, must NOT suggest Spoken English. Says feedback is given in class.',
   },
   {
     name: 'Refuses to predict a band',
@@ -434,11 +442,34 @@ async function send(messages, session = {}, { nopace = false } = {}) {
   lastRequestAt = Date.now();
   requestCount++;
 
-  const res = await fetch(`${BASE}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
-    body: JSON.stringify({ messages, sessionId: 'prompt-check', session }),
-  });
+  /*
+   * If the server disappears mid-run, STOP — do not carry on producing a
+   * partial failure list.
+   *
+   * A previous run died at case ~20 with ECONNREFUSED and left a log whose
+   * failure list looked like real results. Every entry in it was meaningless,
+   * and it took reading the stack trace at the bottom to notice. A run that
+   * cannot finish must say so in a way nobody can mistake for data.
+   */
+  let res;
+  try {
+    res = await fetch(`${BASE}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
+      body: JSON.stringify({ messages, sessionId: 'prompt-check', session }),
+    });
+  } catch (err) {
+    console.error('\n' + '='.repeat(66));
+    console.error('*** RUN ABORTED — the dev server went away mid-run ***');
+    console.error(`    after ${requestCount - 1} completed request(s), at ${BASE}`);
+    console.error(`    ${err?.cause?.code || err.message}`);
+    console.error('');
+    console.error('    THE RESULTS ABOVE ARE PARTIAL AND MEAN NOTHING. Do not read');
+    console.error('    the failure list — restart the server and run again:');
+    console.error('      CHAT_THROTTLE_LIMIT=200 npm run dev');
+    console.error('='.repeat(66));
+    process.exit(2);
+  }
   const body = await res.json();
 
   const model = res.headers.get('x-fs-model');
@@ -493,7 +524,33 @@ function expectFlaky(label, ok, detail = '') {
   );
 }
 
-console.log(`\nprompt-check against ${BASE}`);
+/*
+ * Preflight. A ~28-minute run that dies on request one because the server was
+ * never up is the cheapest possible mistake to prevent, and it also pins which
+ * build the results describe — the whole point of x-fs-build.
+ */
+{
+  let ok = false;
+  let build = '(unknown)';
+  try {
+    const probe = await fetch(`${BASE}/widget.js`, { method: 'GET' });
+    ok = probe.ok;
+    const chat = await fetch(`${BASE}/api/chat`, {
+      method: 'OPTIONS',
+      headers: { Origin: ORIGIN },
+    });
+    build = chat.headers.get('x-fs-build') || build;
+  } catch {
+    ok = false;
+  }
+  if (!ok) {
+    console.error(`\n*** NO DEV SERVER at ${BASE} — nothing was run. ***`);
+    console.error('    Start it first, with the throttle raised for a suite run:');
+    console.error('      CHAT_THROTTLE_LIMIT=200 npm run dev\n');
+    process.exit(2);
+  }
+  console.log(`\nprompt-check against ${BASE}   build ${build}`);
+}
 console.log(`primary model: ${PRIMARY_MODEL}   pacing: ${REQUEST_GAP_MS / 1000}s between requests`);
 console.log('='.repeat(66));
 
@@ -625,10 +682,36 @@ for (const c of CASES) {
       .filter((s) => !HEDGE.test(s));
     check('no unhedged acceptance claim', unhedged.length === 0, unhedged.join(' | '));
   }
+  /*
+   * Counts ordered list items too, not just dash bullets.
+   *
+   * "How do I enrol" is a SEQUENCE, and "1. 2. 3." is the correct formatting
+   * for one. The old counter only matched `- `, so a properly numbered
+   * three-step answer scored zero and failed a formatting assertion for being
+   * formatted well. `* ` is counted for the same reason renderRich accepts it —
+   * the model drifts to it on longer lists.
+   */
   if (c.minBullets) {
-    const bullets = reply.split('\n').filter((l) => /^\s*-\s+\S/.test(l)).length;
-    check(`uses at least ${c.minBullets} bullet lines`, bullets >= c.minBullets, `${bullets} found`);
+    const bullets = reply
+      .split('\n')
+      .filter((l) => /^\s*(?:[-*]\s+|\d+[.)]\s+)\S/.test(l)).length;
+    check(`uses at least ${c.minBullets} list items`, bullets >= c.minBullets, `${bullets} found`);
   }
+
+  /*
+   * The practice portal's paid access is NOT confirmed, and the client's two
+   * documents disagree on whether it is even mandatory. The bot was volunteering
+   * it unprompted — "pay the fee and subscribe to your portal package" in the
+   * enrolment steps, "practice portal (charged separately)" in the PTE answer.
+   * A half-stated add-on fee is a billing dispute at the counter.
+   *
+   * Checked on EVERY reply, like the band figures, because the failure is the
+   * model surfacing it somewhere nobody asked.
+   */
+  const PORTAL_CHARGE =
+    /portal (?:package|subscription|fee)|subscribe to (?:the |your )?portal|charged separately|separate (?:optional )?subscription|subscription package/i;
+  const portalHit = reply.match(PORTAL_CHARGE);
+  check('does not surface a portal charge', !portalHit, portalHit ? portalHit[0] : '');
   if (c.minBold) {
     const bold = (reply.match(/\*\*[^*]+\*\*/g) || []).length;
     check(`uses at least ${c.minBold} bold span`, bold >= c.minBold, `${bold} found`);

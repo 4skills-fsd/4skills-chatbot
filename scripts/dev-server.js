@@ -21,6 +21,24 @@ import { dirname, join, normalize } from 'node:path';
 import { readWidget, hashOf, gzippedBytes, SIZE_LIMIT_GZIP } from '../lib/build.js';
 import { reportOrigins } from '../lib/guard.js';
 
+/*
+ * `npm run dev:test` — a dev server configured for a suite run.
+ *
+ * A full prompt-check is ~36 requests from one session, and api/chat.js allows
+ * 20 per 10 minutes, so a plain dev server throttles the suite partway through
+ * and silently leaves cases unscored — one came back "You have sent a lot of
+ * messages" instead of an answer.
+ *
+ * The documented fix was `CHAT_THROTTLE_LIMIT=200 npm run dev`, which is
+ * bash-only syntax. It does nothing in PowerShell, and it did nothing in the
+ * run where it was used. Setting it from a flag works identically in both
+ * shells and needs no cross-env dependency.
+ */
+if (process.argv.includes('--suite')) {
+  process.env.CHAT_THROTTLE_LIMIT = process.env.CHAT_THROTTLE_LIMIT || '200';
+  process.env.CHAT_IP_LIMIT = process.env.CHAT_IP_LIMIT || '2000';
+}
+
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 3000;
 
@@ -138,6 +156,7 @@ server.listen(PORT, () => {
   console.log(`  static    public/   (widget.js is no-store)`);
   console.log(`  models    ${process.env.GROQ_MODELS || '(default chain)'}`);
   console.log(`  groq      ${process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1'}`);
+  console.log(`  throttle  ${process.env.CHAT_THROTTLE_LIMIT || 20} per session / 10 min`);
   console.log(`  key       ${process.env.GROQ_API_KEY ? 'set (developer key — the client key lives only in Vercel)' : 'MISSING'}`);
   console.log('');
   // Prints the resolved allowlist and shouts about malformed entries. A missing
