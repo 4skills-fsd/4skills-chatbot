@@ -57,6 +57,31 @@
   // model anyway. Keeping the client cap equal to the server cap means what we
   // store is exactly what we send.
   var MAX_HISTORY = 20;
+
+  /*
+   * How many messages go to the model. 4 = two exchanges.
+   *
+   * History is the only part of the payload that grows, and at ~3,650 static
+   * tokens against an 8,000 TPM ceiling there is room for roughly two requests
+   * a minute for the WHOLE SITE. Nothing older than the last two exchanges
+   * changes an admissions answer, and none of it needs to survive the
+   * conversation — the name and number are what persist, and those go to the
+   * client's sheet through /api/lead.
+   */
+  var SEND_WINDOW = 4;
+
+  /*
+   * Short affirmatives that accept a callback offer, English and Roman Urdu.
+   * Matched case- and punctuation-insensitively, and only on messages of
+   * AFFIRMATIVE_MAX_CHARS or fewer, so "yes but what about the UKVI fee" still
+   * goes to the model.
+   */
+  var AFFIRMATIVE = [
+    'yes', 'yeah', 'yep', 'yup', 'ok', 'okay', 'sure', 'please', 'plz',
+    'haan', 'han', 'ji', 'ji haan', 'jee', 'theek', 'theek hai', 'thik hai',
+    'kar dain', 'kardo', 'call me', 'call'
+  ];
+  var AFFIRMATIVE_MAX_CHARS = 25;
   var REQUEST_TIMEOUT = 20000;
 
   var GREETING =
@@ -690,9 +715,49 @@
   // proactive bot turning into a nagging one; phase 6 sets it.
   var flags = readStore(KEY_FLAGS, {}) || {};
 
+  /*
+   * The turn currently in flight.
+   *
+   * A user message is rendered immediately but does NOT join `history` until
+   * the server answers 2xx. On any failure it is dropped permanently.
+   *
+   * From a real transcript: turn 4 ("yes") failed with the hard-failure
+   * message, but had already been written to history. Turn 5 ("hi") therefore
+   * sent that orphaned "yes" to the model, which answered IT instead — the
+   * visitor typed "hi" and was told "I will arrange a call for you to discuss
+   * batch details." The conversation never recovered, because every later turn
+   * carried the same corrupt prefix.
+   *
+   * Rendering optimistically and committing on success is what keeps the
+   * on-screen thread honest while the payload stays clean.
+   */
+  var pendingUser = null;
+
   function persist() {
     if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
     writeStore(KEY_CHAT, history);
+  }
+
+  /*
+   * What actually goes on the wire: the last SEND_WINDOW messages, content
+   * untouched.
+   *
+   * Windowed BY COUNT ONLY. Never truncate message content to save tokens —
+   * the 500-char user cap was once applied to assistant replies in this array
+   * and rejected every conversation from turn 3 onward, because one long bot
+   * answer poisoned every later request. Dropping whole old turns is safe;
+   * trimming the inside of a turn is how that bug comes back.
+   *
+   * `history` itself stays at MAX_HISTORY so the visible thread survives a page
+   * navigation — the PHP site is full page loads. This is a payload window, not
+   * a storage window.
+   */
+  function outbound() {
+    var all = pendingUser ? history.concat([pendingUser]) : history;
+    return all.slice(-SEND_WINDOW).map(function (m) {
+      // Only the two fields the API accepts. `offer` is ours, not the model's.
+      return { role: m.role, content: m.content };
+    });
   }
 
   /**
@@ -1151,16 +1216,85 @@
       return;
     }
 
-    addMessage(text, 'user');
-    history.push({ role: 'user', content: text });
-    persist();
-
     input.value = '';
     autoGrow();
     updateCounter();
+
+    /*
+     * "yes" to a callback offer opens the form here, with no model call.
+     *
+     * The model used to be load-bearing for this: it had to emit [[LEAD]] on
+     * the turn after its own offer. gpt-oss-20b paraphrases the offer line, and
+     * the marker rule is attached to the line it paraphrased away — so a real
+     * visitor answered "yes" twice and no form ever appeared. The decision does
+     * not belong to the model; it belongs to whether the previous message was
+     * an offer, which the server already told us.
+     *
+     * Also saves one request per lead against the token budget.
+     */
+    if (acceptsOffer(text)) {
+      addMessage(text, 'user');
+      history.push({ role: 'user', content: text });
+      persist();
+      if (showLeadForm()) {
+        flags.leadAsked = true;
+        writeStore(KEY_FLAGS, flags);
+      }
+      if (window.console && window.console.log) {
+        window.console.log(
+          '[4Skills] lead form opened locally (offer + affirmative) — no /api/chat call'
+        );
+      }
+      return;
+    }
+
+    addMessage(text, 'user');
+    // NOT pushed to history yet — see pendingUser. Committed in receive() on a
+    // 2xx, dropped on every failure path.
+    pendingUser = { role: 'user', content: text };
+
     setBusy(true);
 
     ask(showTyping());
+  }
+
+  /** The most recent assistant turn, or null. */
+  function lastAssistant() {
+    for (var i = history.length - 1; i >= 0; i--) {
+      if (history[i].role === 'assistant') return history[i];
+    }
+    return null;
+  }
+
+  /**
+   * True when this message is a bare "yes" to an offer the assistant just made
+   * and the form is still allowed to open.
+   */
+  function acceptsOffer(text) {
+    if (text.length > AFFIRMATIVE_MAX_CHARS) return false;
+    if (flags.leadCaptured || flags.leadDeclined) return false;
+
+    var last = lastAssistant();
+    if (!last || !last.offer) return false;
+
+    // Strip punctuation and collapse spaces: "Yes!", "yes please", "ji, haan".
+    var norm = text
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!norm) return false;
+
+    for (var i = 0; i < AFFIRMATIVE.length; i++) {
+      if (norm === AFFIRMATIVE[i]) return true;
+    }
+    // "yes please", "ok sure", "haan ji" — every word is an affirmative.
+    var words = norm.split(' ');
+    if (words.length > 3) return false;
+    for (var j = 0; j < words.length; j++) {
+      if (AFFIRMATIVE.indexOf(words[j]) === -1) return false;
+    }
+    return true;
   }
 
   function ask(typing) {
@@ -1185,7 +1319,7 @@
       credentials: 'omit',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        messages: history.slice(-MAX_HISTORY),
+        messages: outbound(),
         sessionId: sessionId,
         session: flags
       })
@@ -1214,8 +1348,21 @@
       })
       .catch(function () {
         if (done()) return;
+        dropPending();
         showError();
       });
+  }
+
+  /*
+   * The in-flight turn failed. It stays out of history permanently, so the next
+   * request cannot carry a question the assistant never answered.
+   *
+   * It remains on SCREEN — the visitor said it, and silently deleting their own
+   * words would be worse than the bug this fixes. The thread shows what
+   * happened; the payload shows what the model can actually reason about.
+   */
+  function dropPending() {
+    pendingUser = null;
   }
 
   function receive(r) {
@@ -1223,6 +1370,7 @@
 
     // No usable body: 403, a proxy error page, a parse failure. Give direction.
     if (!body || typeof body.reply !== 'string') {
+      dropPending();
       showError();
       return;
     }
@@ -1230,6 +1378,12 @@
     // All three models down, or the key is missing. The server still sends a
     // reply and a WhatsApp link rather than an error.
     if (body.degraded) {
+      dropPending();
+      if (body.errorKind && window.console && window.console.log) {
+        // Same sentence to the visitor either way; this is for whoever is
+        // reading the console when it happens again.
+        window.console.log('[4Skills] degraded errorKind=' + body.errorKind);
+      }
       addMessage(body.reply, 'bot', {
         error: true,
         link: { href: body.whatsapp || WHATSAPP, text: 'Open WhatsApp' }
@@ -1240,12 +1394,22 @@
     // Rate limited, or validation rejected it. The server writes the copy for
     // these. Show it, but never store it — it is not something the assistant said.
     if (r.status !== 200) {
+      dropPending();
       addMessage(body.reply, 'bot');
       return;
     }
 
+    // 2xx: the turn is real. Commit the visitor's message, then the reply.
+    if (pendingUser) {
+      history.push(pendingUser);
+      pendingUser = null;
+    }
+
     addMessage(body.reply, 'bot');
-    history.push({ role: 'assistant', content: body.reply });
+    // `offer` rides along in storage so a bare "yes" after a page navigation
+    // still opens the form. sanitiseMessages() on the server keeps only role
+    // and content, and outbound() strips it too, so it never reaches the model.
+    history.push({ role: 'assistant', content: body.reply, offer: !!body.offer });
     persist();
 
     // The server has already applied the session gates, but re-checking here

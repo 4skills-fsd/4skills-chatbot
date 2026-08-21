@@ -3,9 +3,14 @@
 // Always returns JSON, including on every failure path. The widget must never
 // receive an HTML error page.
 
-import { complete } from '../lib/groq.js';
+import { classify, complete } from '../lib/groq.js';
 import { currentBuild } from '../lib/build.js';
-import { buildMessages, detectLanguage, isGreetingOnly } from '../lib/prompt.js';
+import {
+  buildMessages,
+  detectLanguage,
+  isGreetingOnly,
+  measureMessages,
+} from '../lib/prompt.js';
 import { retrieve } from '../lib/retrieve.js';
 import {
   corsHeaders,
@@ -56,7 +61,57 @@ const DEGRADED_REPLY =
 // The model is told to emit this when it asks for a name and number. An 8B
 // model will sometimes put it in the wrong place, so strip it wherever it lands
 // rather than only at the end.
-const LEAD_MARKER = /\[\[\s*LEAD\s*\]\]/gi;
+/*
+ * Tolerant of how the model actually writes it, not of how it was asked to.
+ *
+ * Observed drift: single brackets `[LEAD]`, bolded `**[[LEAD]]**`, lowercase,
+ * and stray spaces. All of those are unmistakably the marker and none of them
+ * matched the old exact-literal pattern, so the form silently did not open and
+ * the marker text leaked into the visitor's reply instead.
+ *
+ * The widget no longer depends on this for the common path — an offer plus a
+ * short "yes" opens the form client-side. This is the backstop for the turn
+ * where the model volunteers the marker on its own.
+ */
+const LEAD_MARKER = /\*{0,2}\[{1,2}\s*LEAD\s*\]{1,2}\*{0,2}/gi;
+
+/*
+ * Did this reply OFFER a callback?
+ *
+ * Separate from the [[LEAD]] marker, and needed because of a real transcript:
+ * the model ended a turn with "…I can arrange for a team member to call you",
+ * the visitor replied "yes", and nothing opened. The marker never appeared —
+ * gpt-oss-20b paraphrases the canonical offer line rather than reproducing it,
+ * and the marker rule is attached to the line it paraphrased away.
+ *
+ * So the server tells the widget "that was an offer", the widget remembers it,
+ * and a short "yes" on the next turn opens the form CLIENT-SIDE with no model
+ * call at all. The model stops being load-bearing for the one interaction that
+ * the whole widget exists to produce.
+ *
+ * Tolerant of paraphrase by construction: an optional modal and subject before
+ * the verb, an optional "team member"/"someone"/"colleague" in the middle. It
+ * matches "shall I have someone call you", "I can arrange for a team member to
+ * call you today", "we will call you back", and the Roman Urdu shapes the
+ * knowledge entries use.
+ */
+const CALL_OFFER = new RegExp(
+  [
+    // "...call you", with anything short in between: "have someone call you",
+    // "arrange for a team member to call you", "get a colleague to call you".
+    /\b(?:call|contact|ring|phone)\s+(?:you|aap)\b/.source,
+    // "arrange a call", "set up a callback", "book a call"
+    /\b(?:arrange|schedule|set\s?up|book|organis[ez])\s+(?:a\s+)?(?:call|callback|call\s?back)\b/.source,
+    // "someone will call", "team will get in touch"
+    /\b(?:someone|team|colleague|counsel+or)\s+\w{0,8}\s?(?:will|can|could)\s+(?:call|contact|reach)\b/.source,
+    // Roman Urdu: "call kar dain", "call karwa dain", "aap ko call"
+    /\bcall\s+(?:kar|karwa|kara)\w*\b/.source,
+    /\baap\s+ko\s+call\b/.source,
+    // "share your name and number" — the form's own job, but the model says it
+    /\b(?:name|naam)\s+(?:and|aur)\s+(?:number|phone|contact)\b/.source,
+  ].join('|'),
+  'i',
+);
 
 // Backstop for when the model forgets the marker entirely.
 const ENROL_INTENT =
@@ -188,8 +243,26 @@ export default async function handler(req, res) {
     const entries = greeting ? [] : retrieve(query);
     const retrievedIds = entries.map((e) => e.id);
 
+    const payload = buildMessages(messages, entries);
+
+    /*
+     * Where the tokens actually went, every request.
+     *
+     * The transcript that prompted this logging failed on turn 4 of a
+     * conversation, and "the prompt is ~3,600 tokens" was an average measured
+     * on single-turn requests. Only history grows, so only this split can tell
+     * you whether a failure was the prompt being large or the conversation
+     * being long.
+     */
+    const size = measureMessages(payload);
+    console.log(
+      `[chat] tokens~ static=${size.staticTokens} reference=${size.referenceTokens}` +
+        ` history=${size.historyTokens} total=${size.total}` +
+        ` turns=${messages.length} retrieved=${retrievedIds.length}`,
+    );
+
     const result = await complete({
-      messages: buildMessages(messages, entries),
+      messages: payload,
       temperature: 0.3,
       // 110 words of prose plus bullet formatting. The cap is a runaway guard,
       // not a length target.
@@ -209,7 +282,27 @@ export default async function handler(req, res) {
     };
 
     if (!result.ok) {
-      console.error('[chat] all models failed', JSON.stringify(result.attempts));
+      /*
+       * One line per attempt, so the chain is readable in the Vercel log
+       * without unpacking JSON — including WHY it advanced, which is the
+       * question that gets asked at 11pm when the widget is answering with the
+       * WhatsApp fallback.
+       *
+       * Note TPD appears only in `message`, never in the headers. See groq.js.
+       */
+      for (const a of result.attempts) {
+        console.error(
+          `[chat] chain ${a.model || '(no key)'} -> ${a.status || 'network'}` +
+            (a.code ? ` code=${a.code}` : '') +
+            (a.rateHeaders && Object.keys(a.rateHeaders).length
+              ? ' ' + JSON.stringify(a.rateHeaders)
+              : '') +
+            (a.message || a.error ? ` :: ${(a.message || a.error).slice(0, 200)}` : ''),
+        );
+      }
+      const errorKind = classify(result.attempts);
+      console.error(`[chat] all models failed errorKind=${errorKind}`);
+
       return sendJson(
         res,
         200,
@@ -218,9 +311,24 @@ export default async function handler(req, res) {
           model: null,
           leadPrompt: false,
           degraded: true,
+          // Coarse bucket for diagnosis. The widget renders the same sentence
+          // whatever this says — it exists so the NEXT failure is not guesswork.
+          errorKind,
           whatsapp: `https://wa.me/${WHATSAPP()}`,
         },
-        { ...headers, 'x-fs-model': 'none' },
+        { ...headers, 'x-fs-model': 'none', 'x-fs-error': errorKind },
+      );
+    }
+
+    // Which model actually served it, and whether the chain had to move.
+    if (result.attempts.length > 1) {
+      console.log(
+        `[chat] served by ${result.model} after ${result.attempts.length - 1} ` +
+          `failed attempt(s): ` +
+          result.attempts
+            .slice(0, -1)
+            .map((a) => `${a.model}=${a.status || 'network'}${a.code ? '/' + a.code : ''}`)
+            .join(' '),
       );
     }
 
@@ -246,11 +354,23 @@ export default async function handler(req, res) {
     // how you confirm the static prefix is actually being cached in production —
     // if it sits at 0 across identical requests, prompt caching has broken and
     // the TPM headroom assumption in CLAUDE.md no longer holds.
+    /*
+     * Did the assistant just offer to call them? The widget stores this against
+     * the message so that a bare "yes" on the next turn opens the form without
+     * a model round trip. See CALL_OFFER.
+     *
+     * Reported even when leadPrompt is true (the form is already opening) and
+     * even when the visitor has declined — the widget applies its own gates,
+     * and a flag that lies about what the message said would be worse than
+     * useless when someone is debugging the next transcript.
+     */
+    const offer = CALL_OFFER.test(reply);
+
     const usage = result.usage || {};
     return sendJson(
       res,
       200,
-      { reply, model: result.model, leadPrompt },
+      { reply, model: result.model, leadPrompt, offer },
       {
         ...headers,
         'x-fs-model': result.model,
@@ -263,6 +383,9 @@ export default async function handler(req, res) {
           `declined=${!!session.leadDeclined}`,
           `captured=${!!session.leadCaptured}`,
         ].join(' '),
+        // Whether this reply offered a callback, so "why did no form open?" is
+        // answerable from the network tab like the rest of the lead gate.
+        'x-fs-offer': String(offer),
         'x-fs-tokens': String(usage.prompt_tokens ?? 0),
         'x-fs-cached': String(usage.prompt_tokens_details?.cached_tokens ?? 0),
       },

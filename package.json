@@ -18,6 +18,7 @@
     "teaser-check": "node scripts/teaser-check.js",
     "validation-check": "node scripts/validation-check.js",
     "prompt-check": "node --env-file-if-exists=.env.local scripts/prompt-check.js",
-    "deploy": "vercel --prod"
+    "deploy": "vercel --prod",
+    "conversation-check": "node scripts/conversation-check.js"
   }
 }
