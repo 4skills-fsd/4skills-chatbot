@@ -1388,6 +1388,30 @@
         error: true,
         link: { href: body.whatsapp || WHATSAPP, text: 'Open WhatsApp' }
       });
+
+      /*
+       * Out of quota is the one failure worth capturing a lead through.
+       *
+       * /api/lead never touches Groq, so the form works perfectly while the
+       * model is refusing — and the daily ceiling is ~155 requests across the
+       * chain against a ~60/day traffic estimate, which means the outage
+       * arrives on the client's busiest days. Doing nothing there loses the
+       * leads that matter most.
+       *
+       * ONLY on rate_limit. model_gone, upstream and network keep the existing
+       * message: those are our bugs or a genuine outage, and following them
+       * with a form reads as harvesting a number while broken.
+       *
+       * leadCaptured is checked inside showLeadForm(); leadDeclined is checked
+       * here, because someone who already said no should not be asked again
+       * just because the model went down. They still get the WhatsApp link.
+       */
+      if (body.errorKind === 'rate_limit' && !flags.leadDeclined) {
+        if (showLeadForm({ title: 'Leave your name and number and the team will call you back.' })) {
+          flags.leadAsked = true;
+          writeStore(KEY_FLAGS, flags);
+        }
+      }
       return;
     }
 
@@ -1541,8 +1565,24 @@
   }
 
   /** @returns {boolean} true only if a form was actually put on screen. */
-  function showLeadForm() {
+  /*
+   * @param {{title?: string}} [opts] alternative heading. Used by the outage
+   *   path, which needs copy about the team calling back rather than the
+   *   normal "leave your number" invitation. Everything else — validation, the
+   *   #C0392B error styling, sendLead() and the server-side throttle — is the
+   *   same code either way, deliberately: an outage is the worst possible
+   *   moment to be exercising a second, less-tested submit path.
+   */
+  function showLeadForm(opts) {
     if (leadCard || flags.leadCaptured) return false;
+
+    opts = opts || {};
+    // Both callers pass a widget-owned constant, never model output — but this
+    // card is built with innerHTML, so the one interpolated value gets escaped
+    // rather than relying on that staying true.
+    var title = String(
+      opts.title || 'Leave your name and number and the team will call you on WhatsApp.'
+    ).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
     var guess = inferCourse();
     var card = document.createElement('div');
@@ -1555,7 +1595,7 @@
 
     card.innerHTML = [
       '<div class="fs-lead-head">',
-      '<div class="fs-lead-title">Leave your name and number and the team will call you on WhatsApp.</div>',
+      '<div class="fs-lead-title">' + title + '</div>',
       '<button class="fs-lead-x" type="button" aria-label="No thanks">' + ICON_X_SMALL + '</button>',
       '</div>',
       '<div class="fs-field fs-f-name"><label for="fs-name">Name</label>',

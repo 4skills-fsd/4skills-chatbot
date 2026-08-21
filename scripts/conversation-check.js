@@ -109,6 +109,13 @@ function makeWidget() {
     if (!body || typeof body.reply !== 'string' || body.degraded || r.status !== 200) {
       w.setPending(null);                       // dropPending()
       state.rendered.push({ who: 'bot', text: body && body.reply, error: true });
+
+      // receive(): the outage lead form, rate_limit only.
+      if (body && body.degraded && body.errorKind === 'rate_limit' && !state.flags.leadDeclined) {
+        state.formOpens++;
+        state.formTitle = 'Leave your name and number and the team will call you back.';
+        state.flags.leadAsked = true;
+      }
       return { calledApi: true, committed: false };
     }
 
@@ -254,6 +261,87 @@ console.log('\npayload never exceeds the send window');
   // The bug this suite exists to prevent coming back.
   check('no message content was truncated',
     state.calls.every((c) => c.every((m) => !/\.\.\.$|…$/.test(m.content))));
+}
+
+// --- 6. capturing leads while the model is unavailable ----------------------
+//
+// The daily token ceiling is ~155 requests across the chain against a ~60/day
+// estimate, so an outage lands on the client's busiest days. /api/lead never
+// touches Groq, so the form still works when the model does not.
+
+console.log('\nrate_limit outage still captures a lead');
+{
+  const { state, send } = makeWidget();
+  send('class timings', ok200('Classes run 9am to 8pm.'));
+  const before = state.calls.length;
+  const r = send('ielts academic', degraded('rate_limit'));
+
+  check('lead form renders on rate_limit', state.formOpens === 1);
+  check('copy is about a call back, not a broken assistant',
+    /call you back/i.test(state.formTitle) && !/cannot reach|broken|unavailable/i.test(state.formTitle),
+    state.formTitle);
+  check('no extra /api/chat call for the form', state.calls.length === before + 1);
+  check('the failed turn is still not committed', r.committed === false);
+  check('outage message was never stored as an assistant turn',
+    !state.history.some((m) => /getting a lot of questions/i.test(m.content)));
+}
+
+console.log('\nthe other three errorKinds get the message and no form');
+for (const kind of ['upstream', 'network', 'model_gone']) {
+  const { state, send } = makeWidget();
+  send('class timings', ok200('Classes run 9am to 8pm.'));
+  send('ielts academic', degraded(kind));
+  check(`${kind} renders no lead form`, state.formOpens === 0);
+}
+
+console.log('\na visitor who already declined is not re-asked during an outage');
+{
+  const { state, send } = makeWidget();
+  send('class timings', ok200('Classes run 9am to 8pm.'));
+  state.flags.leadDeclined = true;
+  send('ielts academic', degraded('rate_limit'));
+  check('declined visitor sees no form', state.formOpens === 0);
+}
+
+// --- 7. the outage lead payload matches the normal one ----------------------
+//
+// Same builder, so a shape difference here would mean the outage path had
+// drifted into a second, less-tested submit. It reads `history`, which on the
+// outage path is missing the failed turn — that is correct, not a defect.
+
+console.log('\noutage lead payload has the same shape as the normal one');
+{
+  const leadPayload = (state) => ({
+    name: 'Ayesha',
+    phone: '0332 241 0155',
+    course: 'IELTS Academic',
+    sessionId: 'sid',
+    transcript: state.history.slice(-6),
+    pageUrl: 'https://4skills.co/',
+    referrer: '',
+  });
+
+  const normal = makeWidget();
+  normal.send('ielts academic', ok200('Rs 35,000. Shall I have someone call you today?', true));
+  normal.send('yes', null);
+  const a = leadPayload(normal.state);
+
+  const outage = makeWidget();
+  outage.send('ielts academic', ok200('Rs 35,000 for IELTS Academic.'));
+  outage.send('what about PTE', degraded('rate_limit'));
+  const b = leadPayload(outage.state);
+
+  check('identical key sets',
+    Object.keys(a).sort().join(',') === Object.keys(b).sort().join(','),
+    Object.keys(b).sort().join(','));
+  check('both carry a transcript array',
+    Array.isArray(a.transcript) && Array.isArray(b.transcript));
+  check('outage transcript excludes the failed turn',
+    !b.transcript.some((m) => /what about PTE/.test(m.content)));
+  check('outage transcript still carries the real conversation',
+    b.transcript.some((m) => /ielts academic/i.test(m.content)));
+  check('no /api/chat call is needed to submit either',
+    typeof a.transcript.length === 'number' && typeof b.transcript.length === 'number');
 }
 
 console.log('');

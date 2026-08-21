@@ -58,6 +58,19 @@ const WHATSAPP = () => process.env.WHATSAPP_NUMBER || '923322410155';
 const DEGRADED_REPLY =
   'I cannot reach the assistant at the moment. Please WhatsApp 0332 241 0155 and the team will help you directly. Office hours are Monday to Friday 9:00 AM to 8:00 PM.';
 
+/*
+ * Separate copy for the quota case, because the widget follows it with a lead
+ * form rather than a dead end.
+ *
+ * Says nothing about the assistant being broken. The daily token ceiling is
+ * roughly 155 requests across the whole chain against a ~60/day estimate, so
+ * an outage lands on the client's BUSIEST days — precisely when a visitor is
+ * worth most and a shrug costs most. /api/lead never touches Groq, so the one
+ * thing this widget exists to produce still works when the model does not.
+ */
+const BUSY_REPLY =
+  'We are getting a lot of questions right now. Leave your name and number below and the team will call you back, or WhatsApp 0332 241 0155 and someone will help you straight away.';
+
 // The model is told to emit this when it asks for a name and number. An 8B
 // model will sometimes put it in the wrong place, so strip it wherever it lands
 // rather than only at the end.
@@ -307,7 +320,7 @@ export default async function handler(req, res) {
         res,
         200,
         {
-          reply: DEGRADED_REPLY,
+          reply: errorKind === 'rate_limit' ? BUSY_REPLY : DEGRADED_REPLY,
           model: null,
           leadPrompt: false,
           degraded: true,

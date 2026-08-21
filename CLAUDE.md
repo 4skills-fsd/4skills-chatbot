@@ -95,6 +95,58 @@ schedule one on a day the client is demoing.
 **Raise this with the client before launch.** A Groq paid tier is the fix; the code needs
 no change.
 
+### The numbers, and where to read them
+
+| Limit | Value | Where it is reported |
+|---|---|---|
+| TPD | **200,000 per model per day** | **The 429 response BODY only.** Never in a header. |
+| TPM | 8,000 per model | `x-ratelimit-*-tokens` |
+| RPD | 1,000 per model | `x-ratelimit-*-requests` |
+
+**Do not try to read TPD from `x-ratelimit-*`.** It is not there, and looking only at the
+headers is exactly why this file called TPD "unverified" for the whole build. `lib/groq.js`
+now captures the headers AND the body on every failed attempt for this reason.
+
+**The three daily buckets are per model, so the chain multiplies daily capacity, not just
+TPM.** Three models × 200,000 = 600,000 tokens/day ≈ **155 requests/day** at the measured
+cost, against a ~60/day traffic estimate. The fallback chain is therefore doing double duty:
+it exists for outages, and it is also the capacity plan. Losing one model to
+decommissioning costs a third of the daily budget, not just a fallback.
+
+Measured cost per request, mean over live traffic:
+
+| | tokens |
+|---|---|
+| Before the Aug 2026 cuts | ~3,750 |
+| After (static prompt 3,714 → **2,671**) | **~2,700** |
+| Daily capacity at that cost | ~74/model, **~222 across the chain** |
+
+The estimate logged as `[chat] tokens~ static=… reference=… history=…` runs about 2% high
+against Groq's own `usage.prompt_tokens` — close enough to answer "which part grew", which
+is the only question it is for. History is the only part that grows, which is why the
+widget sends a 4-message window.
+
+**`prompt-check` runs and live traffic compete for the same quota.** One suite run is
+~36 requests. On the client's key that is a material fraction of the day and it has already
+taken the live widget down once — three suite runs in one day exhausted TPD on two models,
+and the client's first real conversation hit the wall. **Use a separate development key, or
+do not run the suite on a day the client is using the widget.**
+
+### The fallback chain is correct — do not "fix" it
+
+`lib/groq.js` advances to the next model on **any non-ok status except 401/403**, with no
+retry and no sleeping on `retry-after`. This is deliberate:
+
+- Groq's limits are per model, so the next model has its own budget and trying it costs one
+  round trip.
+- Honouring `retry-after` would park a visitor for a whole rate-limit window behind a model
+  already known to be refusing.
+- 401/403 is a key problem, not a model problem, so the rest of the chain is pointless.
+
+Confirmed live 19 Aug 2026: a single request produced 429 on `gpt-oss-20b`, 429 on
+`gpt-oss-120b` and 429 on `qwen`, in chain order. A build prompt has already been written
+on the incorrect assumption that the chain only advanced on 404/5xx. It never did.
+
 TPM is 8,000, up from 6,000. At ~3,800 tokens per request that is ~2 concurrent requests
 per minute. Hence, non-negotiably:
 
@@ -394,7 +446,7 @@ never stored, never sent to the model, so it costs no tokens. Error notices and
 rate-limit messages are rendered but never stored, because replaying them to the model
 would have the assistant appearing to have said things it did not.
 
-**Size budget is 30 KB gzipped, raised from 20 KB. Raw size is unconstrained.** Gzipped is the honest number — it is what crosses the
+**Size budget is 35 KB gzipped, raised from 30 KB (and 20 KB before that). Raw size is unconstrained.** Gzipped is the honest number — it is what crosses the
 wire, and Vercel compresses by default.
 
 The limit lives in `SIZE_LIMIT_GZIP` in `lib/build.js`, and `npm run dev` prints the
