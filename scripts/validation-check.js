@@ -13,6 +13,7 @@
 // about the assistant's own output, which is bounded by max_tokens.
 
 import { sanitiseMessages } from '../api/chat.js';
+import { validateOrigins } from '../lib/guard.js';
 
 let fail = 0;
 function check(label, ok, detail = '') {
@@ -97,6 +98,78 @@ check('over 20 messages rejected',
     .error === 'too_many_messages');
 check('malformed message rejected',
   sanitiseMessages([{ role: 'user' }]).error === 'bad_message');
+
+/*
+ * ALLOWED_ORIGINS parsing.
+ *
+ * The failure this guards is not a crash. A missing comma produces a
+ * syntactically fine list whose third entry is nonsense, ALLOWED_ORIGINS
+ * REPLACES the defaults, and the affected domain starts getting a bare 403
+ * with no CORS headers — which the browser reports as a generic CORS error and
+ * the page renders as nothing at all. Found in a real .env.local.
+ */
+console.log('\nALLOWED_ORIGINS validation:');
+
+const MALFORMED =
+  'https://4skills.co,https://www.4skills.co,https://4skills.apphttps://unlaudable-jaelynn-unanatomized.ngrok-free.dev';
+
+{
+  const r = validateOrigins(MALFORMED);
+  check('the real malformed value is flagged', r.problems.length === 1, r.problems[0]);
+  check('it is flagged as a missing comma', /missing/i.test(r.problems[0] || ''));
+  // The actual damage: the app origin is gone, replaced by a fused string.
+  check('https://4skills.app is NOT in the resulting allowlist',
+    !r.origins.includes('https://4skills.app'), r.origins.join(' | '));
+  check('the fused entry is what took its place',
+    r.origins.some((o) => o.startsWith('https://4skills.apphttps://')));
+  check('the two well-formed origins still survive',
+    r.origins.includes('https://4skills.co') && r.origins.includes('https://www.4skills.co'));
+}
+
+{
+  const good = 'https://4skills.co,https://www.4skills.co,https://4skills.app';
+  const r = validateOrigins(good);
+  check('a valid multi-origin string has no problems', r.problems.length === 0,
+    r.problems.join('; '));
+  check('all three parse', r.origins.length === 3);
+  check('4skills.app is allowed', r.origins.includes('https://4skills.app'));
+}
+
+{
+  const r = validateOrigins('  https://4skills.co , https://4skills.app/ ');
+  check('whitespace and a trailing slash are tolerated',
+    r.problems.length === 0 && r.origins.includes('https://4skills.app'),
+    r.problems.join('; '));
+}
+
+for (const [label, value, expect] of [
+  ['a path is rejected', 'https://4skills.co/widget', /path, query or fragment/],
+  ['a query is rejected', 'https://4skills.co/?x=1', /path, query or fragment/],
+  ['a missing scheme is rejected', '4skills.co', /no scheme/],
+  ['a non-http scheme is rejected', 'ftp://4skills.co', /expected http/],
+]) {
+  const r = validateOrigins(value);
+  check(label, r.problems.length > 0 && expect.test(r.problems[0]), r.problems[0] || '(none)');
+}
+
+{
+  const r = validateOrigins('');
+  check('empty value falls back to DEFAULT_ORIGINS', r.usingDefaults === true);
+  check('defaults include all three production origins',
+    r.origins.includes('https://4skills.co') &&
+      r.origins.includes('https://www.4skills.co') &&
+      r.origins.includes('https://4skills.app'),
+    r.origins.join(' | '));
+  check('defaults are clean', r.problems.length === 0);
+  // `undefined` falls through to the default parameter, which reads the real
+  // env var — so clear it first, or this passes or fails depending on whether
+  // the runner happened to load .env.local.
+  const saved = process.env.ALLOWED_ORIGINS;
+  delete process.env.ALLOWED_ORIGINS;
+  const u = validateOrigins(undefined);
+  if (saved !== undefined) process.env.ALLOWED_ORIGINS = saved;
+  check('undefined behaves the same as empty', u.usingDefaults === true);
+}
 
 console.log('');
 console.log(fail ? fail + ' FAILED' : 'all validation tests passed');

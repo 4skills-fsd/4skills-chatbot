@@ -19,7 +19,7 @@
 // assertion on Windows and yields exit code 127 — which would make a healthy
 // run look like a failure to whatever is watching.
 
-const TARGET = (process.env.HEALTH_URL || 'https://4skills-widget.vercel.app').replace(/\/$/, '');
+const TARGET = (process.env.HEALTH_URL || 'https://4skills-chatbot.vercel.app').replace(/\/$/, '');
 
 // Must be an allowed origin or the request is rejected before it reaches Groq.
 const ORIGIN = process.env.HEALTH_ORIGIN || 'https://4skills.co';

@@ -199,8 +199,8 @@ This sits just before `</body>` in `footer.php`. It is the only change to the we
 ```html
 <!-- 4Skills assistant widget -->
 <script
-  src="https://4skills-widget.vercel.app/widget.js"
-  data-api="https://4skills-widget.vercel.app"
+  src="https://4skills-chatbot.vercel.app/widget.js"
+  data-api="https://4skills-chatbot.vercel.app"
   data-teaser-delay="8000"
   data-teaser-interval="45000"
   data-teaser-max="3"
